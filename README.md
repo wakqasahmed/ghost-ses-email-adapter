@@ -14,7 +14,7 @@ This package is that community-maintained SES provider. A companion minimal PR t
 
 ## Install on Ghost 6.x
 
-This interim setup targets the **v6.53.0** runtime embedded in `ghost:6-alpine`. It requires the bundled wiring patch because stock Ghost does not yet resolve email adapters.
+This interim setup uses the bundled wiring patch because stock Ghost does not yet resolve email adapters. The patch was last verified against the **v6.53.0** runtime embedded in `ghost:6-alpine`; re-run the disposable integration check before applying it to an updated Ghost runtime.
 
 1. Apply [`patches/ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) from the running Ghost runtime directory (`/var/lib/ghost/current` in the official image):
 
@@ -82,13 +82,29 @@ USER node
 
 Pass AWS credentials to the container through its secret manager or environment, and mount/provide the same `adapters.email` configuration shown above. Do not bake credentials into the image or Dockerfile.
 
+### Disposable integration check
+
+Run the repository's disposable Ghost 6.x integration harness with Docker installed:
+
+```bash
+test/integration/ghost-6.sh
+```
+
+It builds a throwaway `ses-adapter-test-*` image using a local `npm pack` archive, starts Ghost with SQLite and obvious fake AWS credentials, waits for Ghost to boot, then prints:
+
+```text
+ADAPTER_CONSTRUCTOR=SESEmailProvider
+```
+
+The harness deliberately uses the floating `ghost:6-alpine` image, so each run tests the Ghost 6.x release Docker Hub serves at that time. It uses a tmpfs-backed Ghost content directory and its trap removes only the image, container, and temporary directory created by that run. Run it before applying the patch to a Ghost update (and twice to confirm repeatability); it never sends through SES.
+
 ### Non-Docker
 
 For a normal Ghost installation, apply the patch from its active runtime directory (the directory equivalent to `/var/lib/ghost/current`), then install the npm alias there, update `config.production.json`, and restart through its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.
 
 ## Upstream status
 
-This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. It only targets the embedded Ghost v6.53.0 runtime; re-check it against the exact runtime version before every Ghost upgrade.
+This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. It was last verified against the embedded Ghost v6.53.0 runtime; re-run the integration check before every Ghost upgrade.
 
 ## Credits
 

@@ -238,14 +238,17 @@ describe('SES Email Provider Adapter', function () {
             command.Source.should.equal('default@example.com');
         });
 
-        it('should include all recipients in Destinations', async function () {
+        it('should send one recipient per SES request', async function () {
+            emailData.recipients = [
+                {email: 'user1@example.com', replacements: [{id: 'name', value: 'Alice'}]},
+                {email: 'user2@example.com', replacements: [{id: 'name', value: 'Bob'}]}
+            ];
+
             await adapter.send(emailData, sendOptions);
 
-            const command = SendRawEmailCommand.firstCall.args[0];
-            command.Destinations.should.deepEqual([
-                'user1@example.com',
-                'user2@example.com'
-            ]);
+            sesClient.send.callCount.should.equal(2);
+            SendRawEmailCommand.firstCall.args[0].Destinations.should.deepEqual(['user1@example.com']);
+            SendRawEmailCommand.secondCall.args[0].Destinations.should.deepEqual(['user2@example.com']);
         });
 
         it('should include configuration set', async function () {
@@ -276,29 +279,67 @@ describe('SES Email Provider Adapter', function () {
             command.Tags[0].Value.should.equal('unknown');
         });
 
-        it('should chunk recipients into batches of 50', async function () {
-            // Create 100 recipients
-            emailData.recipients = Array.from({length: 100}, (_, i) => ({
-                email: `user${i}@example.com`
-            }));
+        it('should retry only recipients that failed in the prior attempt', async function () {
+            emailData.recipients = [
+                {email: 'user1@example.com', replacements: [{id: 'name', value: 'Alice'}]},
+                {email: 'user2@example.com', replacements: [{id: 'name', value: 'Bob'}]}
+            ];
+
+            sesClient.send.onFirstCall().resolves({MessageId: 'first-id'});
+            sesClient.send.onSecondCall().rejects(new Error('temporary SES failure'));
+            sesClient.send.onThirdCall().resolves({MessageId: 'second-id'});
+
+            await adapter.send(emailData, sendOptions).should.be.rejected();
+            await adapter.send(emailData, sendOptions);
+
+            sesClient.send.callCount.should.equal(3);
+            SendRawEmailCommand.getCall(0).args[0].Destinations.should.deepEqual(['user1@example.com']);
+            SendRawEmailCommand.getCall(1).args[0].Destinations.should.deepEqual(['user2@example.com']);
+            SendRawEmailCommand.getCall(2).args[0].Destinations.should.deepEqual(['user2@example.com']);
+        });
+
+        it('should select the configuration set that matches tracking preferences', async function () {
+            adapter = new SESEmailProvider({
+                ses: {
+                    region: 'us-east-1',
+                    fromEmail: 'default@example.com',
+                    configurationSets: {
+                        openAndClick: 'open-and-click',
+                        openOnly: 'open-only',
+                        clickOnly: 'click-only',
+                        disabled: 'tracking-disabled'
+                    }
+                }
+            });
+            emailData.recipients = [{
+                email: 'user1@example.com',
+                replacements: [{id: 'name', value: 'Alice'}]
+            }];
+
+            await adapter.send(emailData, {openTrackingEnabled: true, clickTrackingEnabled: false});
+            await adapter.send(emailData, {openTrackingEnabled: false, clickTrackingEnabled: true});
+            await adapter.send(emailData, {openTrackingEnabled: false, clickTrackingEnabled: false});
+
+            SendRawEmailCommand.getCall(0).args[0].ConfigurationSetName.should.equal('open-only');
+            SendRawEmailCommand.getCall(1).args[0].ConfigurationSetName.should.equal('click-only');
+            SendRawEmailCommand.getCall(2).args[0].ConfigurationSetName.should.equal('tracking-disabled');
+        });
+
+        it('should RFC 2047 encode non-ASCII header values without encoding ASCII values', async function () {
+            emailData.recipients = [{
+                email: 'user1@example.com',
+                replacements: [{id: 'name', value: 'Alice'}]
+            }];
+            emailData.subject = 'Grüße 👋';
+            emailData.from = 'Jörg <test@example.com>';
+            emailData.replyTo = 'Réponse <reply@example.com>';
 
             await adapter.send(emailData, sendOptions);
 
-            // Should have called send twice (100 / 50 = 2)
-            sesClient.send.callCount.should.equal(2);
-        });
-
-        it('should return first message ID from batches', async function () {
-            sesClient.send.onFirstCall().resolves({MessageId: 'first-id'});
-            sesClient.send.onSecondCall().resolves({MessageId: 'second-id'});
-
-            emailData.recipients = Array.from({length: 100}, (_, i) => ({
-                email: `user${i}@example.com`
-            }));
-
-            const result = await adapter.send(emailData, sendOptions);
-
-            result.id.should.equal('first-id');
+            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
+            rawMessage.should.match(/^Subject: =\?UTF-8\?B\?.+\?=$/m);
+            rawMessage.should.match(/^From: =\?UTF-8\?B\?.+\?= <test@example\.com>$/m);
+            rawMessage.should.match(/^Reply-To: =\?UTF-8\?B\?.+\?= <reply@example\.com>$/m);
         });
 
         it('should throw EmailError on SES API error', async function () {
@@ -352,8 +393,9 @@ describe('SES Email Provider Adapter', function () {
             }
         });
 
-        it('should redact PII from error details', async function () {
-            const sesError = new Error('Sensitive error with email@example.com');
+        it('should redact recipient PII from every Ghost-visible error field', async function () {
+            const recipientEmail = 'private.member@example.com';
+            const sesError = new Error(`Sensitive error with ${recipientEmail}`);
             sesError.$metadata = {httpStatusCode: 400};
 
             sesClient.send.rejects(sesError);
@@ -361,10 +403,10 @@ describe('SES Email Provider Adapter', function () {
             try {
                 await adapter.send(emailData, sendOptions);
             } catch (err) {
-                // errorDetails should not contain recipient emails
-                err.errorDetails.should.not.match(/user1@example.com/);
-                err.errorDetails.should.not.match(/user2@example.com/);
-                // But should contain recipient count
+                err.message.should.not.containEql(recipientEmail);
+                err.context.should.not.containEql(recipientEmail);
+                err.errorDetails.should.not.containEql(recipientEmail);
+                JSON.stringify(err).should.not.containEql(recipientEmail);
                 err.errorDetails.should.match(/recipientCount/);
             }
         });
@@ -398,7 +440,7 @@ describe('SES Email Provider Adapter', function () {
     });
 
     describe('getMaximumRecipients()', function () {
-        it('should return 50 (SES bulk send limit)', function () {
+        it('should return 1 so Ghost retries one recipient at a time', function () {
             const adapter = new SESEmailProvider({
                 ses: {
                     region: 'us-east-1',
@@ -408,7 +450,7 @@ describe('SES Email Provider Adapter', function () {
 
             const maxRecipients = adapter.getMaximumRecipients();
 
-            maxRecipients.should.equal(50);
+            maxRecipients.should.equal(1);
         });
     });
 
@@ -476,28 +518,32 @@ describe('SES Email Provider Adapter', function () {
             };
         });
 
-        it('should use bulk BCC path when only required system tokens present', async function () {
-            // Only list_unsubscribe token (required system token)
+        it('should send list-unsubscribe tokens per recipient with one-click headers', async function () {
+            emailData.html = '<p><a href="%%{list_unsubscribe}%%">Unsubscribe</a></p>';
+            emailData.plaintext = 'Unsubscribe: %%{list_unsubscribe}%%';
+            emailData.replacementDefinitions = [{id: 'list_unsubscribe', token: '%%{list_unsubscribe}%%'}];
             emailData.recipients = [
                 {
                     email: 'user1@example.com',
-                    replacements: [{id: 'list_unsubscribe', value: 'https://unsubscribe.com'}]
+                    replacements: [{id: 'list_unsubscribe', value: 'https://unsubscribe.example.com/one'}]
                 },
                 {
                     email: 'user2@example.com',
-                    replacements: [{id: 'list_unsubscribe', value: 'https://unsubscribe.com'}]
+                    replacements: [{id: 'list_unsubscribe', value: 'https://unsubscribe.example.com/two'}]
                 }
             ];
 
             await adapter.send(emailData);
 
-            // Should send ONE bulk email with BCC
-            sesClient.send.callCount.should.equal(1);
+            sesClient.send.callCount.should.equal(2);
 
-            // Verify BCC header exists
-            const callArgs = sesClient.send.getCall(0).args[0];
-            const rawMessage = Buffer.from(callArgs.input.RawMessage.Data).toString();
-            rawMessage.should.match(/^Bcc: user1@example\.com, user2@example\.com$/m);
+            const firstMessage = SendRawEmailCommand.getCall(0).args[0].RawMessage.Data.toString();
+            const secondMessage = SendRawEmailCommand.getCall(1).args[0].RawMessage.Data.toString();
+            firstMessage.should.containEql('https://unsubscribe.example.com/one');
+            firstMessage.should.match(/^List-Unsubscribe: <https:\/\/unsubscribe\.example\.com\/one>$/m);
+            firstMessage.should.match(/^List-Unsubscribe-Post: List-Unsubscribe=One-Click$/m);
+            secondMessage.should.containEql('https://unsubscribe.example.com/two');
+            secondMessage.should.match(/^List-Unsubscribe: <https:\/\/unsubscribe\.example\.com\/two>$/m);
         });
 
         it('should use personalized path when name token present', async function () {
@@ -567,21 +613,34 @@ describe('SES Email Provider Adapter', function () {
             message.should.match(/^To: user1@example\.com$/m);
         });
 
-        it('should include undisclosed-recipients To header in bulk sends', async function () {
+        it('should preserve dollar replacement values literally', async function () {
+            emailData.html = '<p>%%{name}%%</p>';
+            emailData.plaintext = '%%{name}%%';
+            emailData.replacementDefinitions = [{id: 'name', token: '%%{name}%%'}];
             emailData.recipients = [
                 {
                     email: 'user1@example.com',
-                    replacements: [{id: 'list_unsubscribe', value: 'https://unsubscribe.com'}]
+                    replacements: [{id: 'name', value: '$& $` $\' $$'}]
                 }
             ];
 
             await adapter.send(emailData);
 
-            const callArgs = sesClient.send.getCall(0).args[0];
-            const message = Buffer.from(callArgs.input.RawMessage.Data).toString();
+            const message = SendRawEmailCommand.getCall(0).args[0].RawMessage.Data.toString();
+            message.should.containEql('$&=20$`=20$\'=20$$');
+        });
 
-            // Should have undisclosed-recipients To header
-            message.should.match(/^To: undisclosed-recipients:;$/m);
+        it('should not expose recipient emails in SES tags', async function () {
+            emailData.recipients = [{
+                email: 'user.name+tag@example.com',
+                replacements: [{id: 'name', value: 'Alice'}]
+            }];
+
+            await adapter.send(emailData);
+
+            SendRawEmailCommand.getCall(0).args[0].Tags.should.deepEqual([
+                {Name: 'email-id', Value: 'test-email-123'}
+            ]);
         });
     });
 });

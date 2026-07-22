@@ -1,0 +1,9 @@
+{
+  "exclude": [
+    "reference/**",
+    "**/*.md",
+    "**/*.json",
+    "**/*.lock",
+    "patches/**"
+  ]
+}

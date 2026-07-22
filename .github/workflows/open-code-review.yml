@@ -1,0 +1,32 @@
+name: Open Code Review
+
+# Auto-runs only for PRs opened by the maintainer (wakqasahmed). PRs from
+# anyone else are not reviewed automatically — the maintainer can trigger a
+# review manually on any PR by commenting `/ocr-review` (see
+# ocr-manual-review.yml), which supports fork PRs safely since it only ever
+# diffs PR content and never checks out or executes PR-supplied code.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-code-review:
+    if: github.event.pull_request.user.login == 'wakqasahmed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alibaba/open-code-review@1c8f930fc923753b17b80f633aea54274fc83825 # v1.7.15
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ secrets.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          sticky_summary: 'true'
+          incremental: 'true'

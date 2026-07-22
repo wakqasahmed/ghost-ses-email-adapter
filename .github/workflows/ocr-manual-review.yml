@@ -1,0 +1,50 @@
+name: OCR Manual Review
+
+# Lets the maintainer trigger a review on ANY PR (including forks, and
+# including PRs the automatic workflow skipped because they weren't opened
+# by the maintainer) by commenting `/ocr-review`.
+#
+# Safety: this job never checks out, builds, or executes PR-supplied code —
+# it only resolves the PR's base ref / head SHA via the API and hands them
+# to the review action, which diffs content remotely. Gated to the
+# maintainer's own comments only, so an external contributor cannot trigger
+# a review run (or spend LLM budget) by commenting on their own PR.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  manual-review:
+    if: >-
+      github.event.issue.pull_request != null &&
+      github.event.comment.user.login == 'wakqasahmed' &&
+      startsWith(github.event.comment.body, '/ocr-review')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ocr-manual-review-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Resolve PR base ref and head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" > /tmp/pr.json
+          echo "head_sha=$(jq -r .head.sha /tmp/pr.json)" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$(jq -r .base.ref /tmp/pr.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: alibaba/open-code-review@1c8f930fc923753b17b80f633aea54274fc83825 # v1.7.15
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ secrets.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          sticky_summary: 'true'
+          incremental: 'true'
+          base_ref: ${{ steps.pr.outputs.base_ref }}
+          head_sha: ${{ steps.pr.outputs.head_sha }}

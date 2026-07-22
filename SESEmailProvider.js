@@ -523,7 +523,7 @@ class SESEmailProvider extends EmailProviderBase {
             debug(`SES returned ${results.length} individual MessageIds`);
 
             // Return first MessageId as provider_id (fits in 255 char column)
-            // Analytics reconciliation works via:
+            // Analytics reconciliation can use:
             // 1. Each SES event has its own real MessageId (in providerId field)
             // 2. All events grouped by email-id tag (set in SES Tags)
             // 3. Database provider_id is just a reference, not used for matching

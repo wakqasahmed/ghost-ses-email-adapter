@@ -1,4 +1,4 @@
-const should = require('should');
+require('should');
 const sinon = require('sinon');
 const SESAnalyticsProvider = require('../SESAnalyticsProvider');
 

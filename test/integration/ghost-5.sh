@@ -58,6 +58,7 @@ const assert = require('node:assert/strict');
 const root = '/var/lib/ghost/current';
 const sendingServicePath = require.resolve(`${root}/core/server/services/email-service/SendingService`);
 const wrapperPath = require.resolve(`${root}/core/server/services/email-service/EmailServiceWrapper`);
+const membersServicePath = require.resolve(`${root}/core/server/services/members`);
 const SendingService = require(sendingServicePath);
 
 let emailProvider;
@@ -72,6 +73,12 @@ class ObservedSendingService extends SendingService {
 }
 
 require.cache[sendingServicePath].exports = ObservedSendingService;
+require.cache[membersServicePath] = {
+    exports: {
+        api: {members: {}},
+        verificationTrigger: {}
+    }
+};
 delete require.cache[wrapperPath];
 
 const EmailServiceWrapper = require(wrapperPath);

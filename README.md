@@ -74,7 +74,7 @@ USER root
 RUN apk add --no-cache git
 COPY patches/ghost-6.x-email-adapter-wiring.patch /tmp/ghost-email-adapter.patch
 RUN cd /var/lib/ghost/current \
-    && git apply /tmp/ghost-email-adapter.patch \
+    && git apply -p3 /tmp/ghost-email-adapter.patch \
     && npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
 USER node
 ```

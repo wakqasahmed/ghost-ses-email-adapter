@@ -1,6 +1,6 @@
 # Ghost email adapter wiring patch
 #
-# Target runtime: ghost:5-alpine, embedded Ghost v5.130.6
+# Target runtime: ghost:5.130.6-alpine
 # Apply from /var/lib/ghost/current with one command:
 #   git apply /path/to/ghost-5.x-email-adapter-wiring.patch
 

@@ -3,7 +3,33 @@
   "version": "0.0.0",
   "description": "Amazon SES bulk email provider adapter for Ghost",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "EmailProviderBase.js",
+    "SESEmailProvider.js",
+    "SESAnalyticsProvider.js",
+    "patches",
+    "LICENSE",
+    "README.md"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wakqasahmed/ghost-ses-email-adapter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wakqasahmed/ghost-ses-email-adapter/issues"
+  },
+  "homepage": "https://github.com/wakqasahmed/ghost-ses-email-adapter#readme",
+  "keywords": [
+    "ghost",
+    "ghost-cms",
+    "email",
+    "adapter",
+    "amazon-ses",
+    "aws-ses",
+    "newsletter"
+  ],
   "engines": {
     "node": ">=20"
   },

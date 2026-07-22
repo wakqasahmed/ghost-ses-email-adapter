@@ -1,56 +1,57 @@
 # Ghost email adapter wiring patch
 #
-# Target: Ghost v6.53.0 (fe231002ca5c9c938e0e719727b483f14ebd5d00)
-# Generated with git diff from a clean checkout of the target tag.
-# Apply from the Ghost source root with:
-#   git apply patches/ghost-6.x-email-adapter-wiring.patch
+# Target runtime: ghost:6-alpine, embedded Ghost v6.53.0
+# Apply from /var/lib/ghost/current with one command:
+#   git apply /path/to/ghost-6.x-email-adapter-wiring.patch
 
-diff --git a/ghost/core/core/server/adapters/email/email-provider-base.ts b/ghost/core/core/server/adapters/email/email-provider-base.ts
+diff --git a/core/server/adapters/email/email-provider-base.js b/core/server/adapters/email/email-provider-base.js
 new file mode 100644
-index 0000000000..383b461e2f
 --- /dev/null
-+++ b/ghost/core/core/server/adapters/email/email-provider-base.ts
-@@ -0,0 +1,16 @@
-+import errors from '@tryghost/errors';
++++ b/core/server/adapters/email/email-provider-base.js
+@@ -0,0 +1,21 @@
++'use strict';
 +
-+export class EmailProviderBase {
-+    public readonly requiredFns = ['send'];
-+    public readonly config: object;
++const errors = require('@tryghost/errors');
 +
-+    constructor(config: object = {}) {
-+        this.config = config;
++class EmailProviderBase {
++    constructor(config) {
++        Object.defineProperty(this, 'requiredFns', {
++            value: ['send'],
++            writable: false
++        });
++
++        this.config = config || {};
 +    }
 +
-+    async send(): Promise<never> {
++    async send() {
 +        throw new errors.IncorrectUsageError({
 +            message: 'send() must be implemented by email provider adapter'
 +        });
 +    }
 +}
-diff --git a/ghost/core/core/server/services/adapter-manager/index.ts b/ghost/core/core/server/services/adapter-manager/index.ts
-index 2a2891806b..fa10053144 100644
---- a/ghost/core/core/server/services/adapter-manager/index.ts
-+++ b/ghost/core/core/server/services/adapter-manager/index.ts
-@@ -4,6 +4,7 @@ import {SSOBase} from '@tryghost/adapter-base-sso';
- import BaseCache from '@tryghost/adapter-base-cache';
- import { RedirectsStoreBase } from '@tryghost/adapter-base-redirects';
- import { RouteSettingsStoreBase } from '@tryghost/adapter-base-route-settings';
-+import {EmailProviderBase} from '../../adapters/email/email-provider-base';
- 
- import {AdapterManager} from './adapter-manager';
- import config from '../../../shared/config';
-@@ -24,6 +25,7 @@ const adapterManager = new AdapterManager({
-         scheduling: SchedulingBase,
-         sso: SSOBase,
-         cache: BaseCache,
-+        email: EmailProviderBase,
-         redirects: RedirectsStoreBase,
-         'route-settings': RouteSettingsStoreBase
++module.exports = EmailProviderBase;
+diff --git a/core/server/services/adapter-manager/index.js b/core/server/services/adapter-manager/index.js
+--- a/core/server/services/adapter-manager/index.js
++++ b/core/server/services/adapter-manager/index.js
+@@ -9,6 +9,7 @@ const adapter_base_sso_1 = require("@tryghost/adapter-base-sso");
+ const adapter_base_cache_1 = __importDefault(require("@tryghost/adapter-base-cache"));
+ const adapter_base_redirects_1 = require("@tryghost/adapter-base-redirects");
+ const adapter_base_route_settings_1 = require("@tryghost/adapter-base-route-settings");
++const email_provider_base_1 = require("../../adapters/email/email-provider-base");
+ const adapter_manager_1 = require("./adapter-manager");
+ const config_1 = __importDefault(require("../../../shared/config"));
+ // A singleton adapter manager, preconfigured with the base classes for every
+@@ -27,6 +28,7 @@ const adapterManager = new adapter_manager_1.AdapterManager({
+         scheduling: adapter_base_scheduling_1.SchedulingBase,
+         sso: adapter_base_sso_1.SSOBase,
+         cache: adapter_base_cache_1.default,
++        email: email_provider_base_1,
+         redirects: adapter_base_redirects_1.RedirectsStoreBase,
+         'route-settings': adapter_base_route_settings_1.RouteSettingsStoreBase
      }
-diff --git a/ghost/core/core/server/services/email-service/email-service-wrapper.js b/ghost/core/core/server/services/email-service/email-service-wrapper.js
-index 0cce5401c9..a42b90404f 100644
---- a/ghost/core/core/server/services/email-service/email-service-wrapper.js
-+++ b/ghost/core/core/server/services/email-service/email-service-wrapper.js
+diff --git a/core/server/services/email-service/email-service-wrapper.js b/core/server/services/email-service/email-service-wrapper.js
+--- a/core/server/services/email-service/email-service-wrapper.js
++++ b/core/server/services/email-service/email-service-wrapper.js
 @@ -22,6 +22,7 @@ class EmailServiceWrapper {
          const BatchSendingService = require('./batch-sending-service');
          const EmailSegmenter = require('./email-segmenter');

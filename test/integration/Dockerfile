@@ -20,3 +20,4 @@ RUN cd /var/lib/ghost/current \
     && chmod +x /usr/local/bin/ses-adapter-test-entrypoint
 
 ENTRYPOINT ["ses-adapter-test-entrypoint"]
+CMD ["node", "current/index.js"]

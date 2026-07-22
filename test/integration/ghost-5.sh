@@ -54,15 +54,36 @@ docker run --detach --name "$container_name" \
 for _ in $(seq 1 60); do
     if docker logs "$container_name" 2>&1 | grep -q 'Ghost is running'; then
         docker exec -i "$container_name" node - <<'NODE'
-const adapterManager = require('/var/lib/ghost/current/core/server/services/adapter-manager');
-const adapter = adapterManager.getAdapter('email');
+const assert = require('node:assert/strict');
+const root = '/var/lib/ghost/current';
+const sendingServicePath = require.resolve(`${root}/core/server/services/email-service/SendingService`);
+const wrapperPath = require.resolve(`${root}/core/server/services/email-service/EmailServiceWrapper`);
+const SendingService = require(sendingServicePath);
 
-if (adapter.constructor.name !== 'SESEmailProvider') {
-    throw new Error(`Expected SESEmailProvider, received ${adapter.constructor.name}`);
+let emailProvider;
+let maximumRecipients;
+
+class ObservedSendingService extends SendingService {
+    constructor(dependencies) {
+        super(dependencies);
+        emailProvider = dependencies.emailProvider;
+        maximumRecipients = this.getMaximumRecipients();
+    }
 }
 
+require.cache[sendingServicePath].exports = ObservedSendingService;
+delete require.cache[wrapperPath];
+
+const EmailServiceWrapper = require(wrapperPath);
+const emailServiceWrapper = new EmailServiceWrapper();
+
+emailServiceWrapper.init();
+
+assert.equal(emailProvider.constructor.name, 'SESEmailProvider');
+assert.equal(maximumRecipients, 50);
+
+console.log(`EMAIL_PROVIDER=${emailProvider.constructor.name}`);
 NODE
-        echo 'ADAPTER_LOADED=SESEmailProvider'
         exit 0
     fi
 

@@ -342,6 +342,28 @@ describe('SES Email Provider Adapter', function () {
             rawMessage.should.match(/^Reply-To: =\?UTF-8\?B\?.+\?= <reply@example\.com>$/m);
         });
 
+        it('should fold long RFC 2047 encoded subject values into valid encoded words', async function () {
+            emailData.recipients = [{
+                email: 'user1@example.com',
+                replacements: [{id: 'name', value: 'Alice'}]
+            }];
+            emailData.subject = 'こんにちは'.repeat(20);
+
+            await adapter.send(emailData, sendOptions);
+
+            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
+            const subject = rawMessage.match(/^Subject: ([\s\S]*?)\r\nDate:/m)[1];
+            const encodedWords = subject.match(/=\?UTF-8\?B\?[^?]+\?=/g);
+
+            encodedWords.length.should.be.above(1);
+            encodedWords.forEach(word => word.length.should.be.belowOrEqual(75));
+            subject.should.containEql('\r\n ');
+            encodedWords
+                .map(word => Buffer.from(word.slice(10, -2), 'base64').toString('utf8'))
+                .join('')
+                .should.equal(emailData.subject);
+        });
+
         it('should throw EmailError on SES API error', async function () {
             const sesError = new Error('MessageRejected');
             sesError.name = 'MessageRejected';

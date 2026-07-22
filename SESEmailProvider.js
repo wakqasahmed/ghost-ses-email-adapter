@@ -90,7 +90,30 @@ class SESEmailProvider extends EmailProviderBase {
             return sanitizedValue;
         }
 
-        return `=?UTF-8?B?${Buffer.from(sanitizedValue, 'utf8').toString('base64')}?=`;
+        const maxEncodedTextLength = 60;
+        const maxUtf8Bytes = maxEncodedTextLength / 4 * 3;
+        const encodedWords = [];
+        let word = '';
+        let wordLength = 0;
+
+        for (const character of sanitizedValue) {
+            const characterLength = Buffer.byteLength(character, 'utf8');
+
+            if (wordLength + characterLength > maxUtf8Bytes) {
+                encodedWords.push(`=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`);
+                word = '';
+                wordLength = 0;
+            }
+
+            word += character;
+            wordLength += characterLength;
+        }
+
+        if (word) {
+            encodedWords.push(`=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`);
+        }
+
+        return encodedWords.join('\r\n ');
     }
 
     #encodeAddressHeader(value) {

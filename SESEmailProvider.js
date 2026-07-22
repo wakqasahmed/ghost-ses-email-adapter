@@ -1,6 +1,7 @@
 const EmailProviderBase = require('./EmailProviderBase');
 const errors = require('@tryghost/errors');
 const debug = require('@tryghost/debug')('email-service:ses-adapter');
+const crypto = require('node:crypto');
 
 /**
  * Amazon SES Email Provider Adapter
@@ -154,8 +155,37 @@ class SESEmailProvider extends EmailProviderBase {
         return replacement?.value ? this.#sanitizeHeader(replacement.value).trim() : '';
     }
 
-    #redactPII(value) {
-        return String(value || 'SES Error').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted]');
+    #redactPII(value, recipients = []) {
+        let redactedValue = String(value || 'SES Error');
+
+        for (const recipient of recipients) {
+            redactedValue = redactedValue.split(String(recipient.email)).join('[redacted]');
+        }
+
+        return redactedValue.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted]');
+    }
+
+    #getRetryKey({emailId, idempotencyKey, subject, html, plaintext, from, replyTo, recipients, replacementDefinitions, options}) {
+        if (emailId) {
+            return `email:${emailId}`;
+        }
+
+        if (idempotencyKey) {
+            return `idempotency:${idempotencyKey}`;
+        }
+
+        const payload = JSON.stringify({
+            subject,
+            html,
+            plaintext,
+            from: from || this.#sesConfig.fromEmail,
+            replyTo,
+            recipients,
+            replacementDefinitions,
+            options
+        });
+
+        return `payload:${crypto.createHash('sha256').update(payload).digest('hex')}`;
     }
 
     /**
@@ -386,8 +416,8 @@ class SESEmailProvider extends EmailProviderBase {
      * @param {Object} error - AWS error object
      * @returns {string} Error message (max 2000 chars)
      */
-    #createSESErrorMessage(error) {
-        const message = this.#redactPII(error?.message) + (error?.$metadata?.httpStatusCode ? ` (${error.$metadata.httpStatusCode})` : '');
+    #createSESErrorMessage(error, recipients) {
+        const message = this.#redactPII(error?.message, recipients) + (error?.$metadata?.httpStatusCode ? ` (${error.$metadata.httpStatusCode})` : '');
         return message.slice(0, 2000);
     }
 
@@ -396,27 +426,23 @@ class SESEmailProvider extends EmailProviderBase {
      * Sends ONE email with up to 50 recipients in BCC per batch
      * @private
      */
-    async #sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, startTime, options}) {
+    async #sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options}) {
         const {SendRawEmailCommand} = require('@aws-sdk/client-ses');
-
-        // SES allows up to 50 destinations per SendRawEmail call
         const BATCH_SIZE = 50;
-        const batches = this.#chunkArray(recipients, BATCH_SIZE);
+        const successfulRecipients = this.#successfulRecipients.get(retryKey) || new Set();
+        const pendingRecipients = recipients.filter(recipient => !successfulRecipients.has(recipient.email));
+        const batches = this.#chunkArray(pendingRecipients, BATCH_SIZE);
         const results = [];
 
         debug(`sending bulk email to ${recipients.length} recipients in ${batches.length} batches`);
 
         for (const batch of batches) {
-            // Build MIME email with BCC recipients
             const bccList = batch.map(r => r.email).join(', ');
-
-            // Sanitize all header values to prevent header injection attacks
             const sanitizedFrom = this.#sanitizeHeader(from || this.#sesConfig.fromEmail);
             const encodedFrom = this.#encodeAddressHeader(sanitizedFrom);
             const encodedSubject = this.#encodeHeaderValue(subject);
             const encodedReplyTo = this.#encodeAddressHeader(replyTo);
 
-            // Encode content as quoted-printable
             const encodedPlaintext = this.#encodeQuotedPrintable(plaintext || '');
             const encodedHtml = this.#encodeQuotedPrintable(html || '');
 
@@ -458,9 +484,8 @@ class SESEmailProvider extends EmailProviderBase {
 
             const rawMessage = mime.join('\r\n');
 
-            // Build SendRawEmail command with all batch recipients as Destinations
             const command = new SendRawEmailCommand({
-                Source: from || this.#sesConfig.fromEmail,
+                Source: encodedFrom,
                 Destinations: batch.map(r => r.email),
                 RawMessage: {
                     Data: Buffer.from(rawMessage)
@@ -474,10 +499,13 @@ class SESEmailProvider extends EmailProviderBase {
                 ]
             });
 
-            // Send via SES
             const response = await this.#sesClient.send(command);
             results.push(response.MessageId);
+            batch.forEach(recipient => successfulRecipients.add(recipient.email));
+            this.#successfulRecipients.set(retryKey, successfulRecipients);
         }
+
+        this.#successfulRecipients.delete(retryKey);
 
         const duration = Date.now() - startTime;
         const throughput = recipients.length / (Math.max(duration, 1) / 1000);
@@ -514,6 +542,7 @@ class SESEmailProvider extends EmailProviderBase {
             from,
             replyTo,
             emailId,
+            idempotencyKey,
             recipients = [],
             replacementDefinitions = []
         } = data;
@@ -523,64 +552,65 @@ class SESEmailProvider extends EmailProviderBase {
 
         try {
             const hasPersonalization = recipients.some(recipient => recipient.replacements?.length);
+            const retryKey = this.#getRetryKey({emailId, idempotencyKey, subject, html, plaintext, from, replyTo, recipients, replacementDefinitions, options});
 
             if (!hasPersonalization) {
-                // No personalization: send ONE email with all recipients in BCC (efficient for large newsletters)
-                return await this.#sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, startTime, options});
+                return await this.#sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options});
             }
 
             const {SendRawEmailCommand} = require('@aws-sdk/client-ses');
             const configurationSetName = this.#getConfigurationSetName(options);
-            const successfulRecipients = emailId ? this.#successfulRecipients.get(emailId) || new Set() : new Set();
+            const encodedFrom = this.#encodeAddressHeader(from || this.#sesConfig.fromEmail);
+            const successfulRecipients = this.#successfulRecipients.get(retryKey) || new Set();
             const pendingRecipients = recipients.filter(recipient => !successfulRecipients.has(recipient.email));
             const results = [];
+            let failedResult;
 
-            const sendResults = await Promise.allSettled(pendingRecipients.map(async (recipient) => {
-                const personalizedHtml = this.#processReplacements(html, recipient.replacements, replacementDefinitions, true);
-                const personalizedPlaintext = this.#processReplacements(plaintext, recipient.replacements, replacementDefinitions, false);
-                const rawMessage = this.#buildMIMEEmail({
-                    from: from || this.#sesConfig.fromEmail,
-                    to: recipient.email,
-                    subject,
-                    html: personalizedHtml,
-                    plaintext: personalizedPlaintext,
-                    replyTo,
-                    listUnsubscribe: this.#getListUnsubscribeUrl(recipient.replacements)
-                });
-                const command = new SendRawEmailCommand({
-                    Source: from || this.#sesConfig.fromEmail,
-                    Destinations: [recipient.email],
-                    RawMessage: {
-                        Data: Buffer.from(rawMessage)
-                    },
-                    ConfigurationSetName: configurationSetName,
-                    Tags: [{
-                        Name: 'email-id',
-                        Value: emailId || 'unknown'
-                    }]
-                });
-                const response = await this.#sesClient.send(command);
-                return {messageId: response.MessageId, recipient: recipient.email};
-            }));
+            for (const batch of this.#chunkArray(pendingRecipients, 10)) {
+                const sendResults = await Promise.allSettled(batch.map(async (recipient) => {
+                    const personalizedHtml = this.#processReplacements(html, recipient.replacements, replacementDefinitions, true);
+                    const personalizedPlaintext = this.#processReplacements(plaintext, recipient.replacements, replacementDefinitions, false);
+                    const rawMessage = this.#buildMIMEEmail({
+                        from: from || this.#sesConfig.fromEmail,
+                        to: recipient.email,
+                        subject,
+                        html: personalizedHtml,
+                        plaintext: personalizedPlaintext,
+                        replyTo,
+                        listUnsubscribe: this.#getListUnsubscribeUrl(recipient.replacements)
+                    });
+                    const command = new SendRawEmailCommand({
+                        Source: encodedFrom,
+                        Destinations: [recipient.email],
+                        RawMessage: {
+                            Data: Buffer.from(rawMessage)
+                        },
+                        ConfigurationSetName: configurationSetName,
+                        Tags: [{
+                            Name: 'email-id',
+                            Value: emailId || 'unknown'
+                        }]
+                    });
+                    const response = await this.#sesClient.send(command);
+                    return {messageId: response.MessageId, recipient: recipient.email};
+                }));
 
-            const failedResult = sendResults.find(result => result.status === 'rejected');
-            for (const result of sendResults) {
-                if (result.status === 'fulfilled') {
-                    successfulRecipients.add(result.value.recipient);
-                    results.push(result.value);
+                for (const result of sendResults) {
+                    if (result.status === 'fulfilled') {
+                        successfulRecipients.add(result.value.recipient);
+                        results.push(result.value);
+                    } else if (!failedResult) {
+                        failedResult = result;
+                    }
                 }
             }
 
             if (failedResult) {
-                if (emailId) {
-                    this.#successfulRecipients.set(emailId, successfulRecipients);
-                }
+                this.#successfulRecipients.set(retryKey, successfulRecipients);
                 throw failedResult.reason;
             }
 
-            if (emailId) {
-                this.#successfulRecipients.delete(emailId);
-            }
+            this.#successfulRecipients.delete(retryKey);
 
             const duration = Date.now() - startTime;
             const throughput = recipients.length / (Math.max(duration, 1) / 1000);
@@ -599,9 +629,9 @@ class SESEmailProvider extends EmailProviderBase {
             let ghostError;
 
             const redactedError = {
-                name: this.#redactPII(e.name),
-                message: this.#redactPII(e.message),
-                code: this.#redactPII(e.code),
+                name: this.#redactPII(e.name, recipients),
+                message: this.#redactPII(e.message, recipients),
+                code: this.#redactPII(e.code, recipients),
                 statusCode: e.$metadata?.httpStatusCode
             };
 
@@ -610,16 +640,16 @@ class SESEmailProvider extends EmailProviderBase {
                 recipientCount: recipients.length
             }).slice(0, 2000);
 
-            const sanitizedError = new Error(this.#redactPII(e.message));
-            sanitizedError.name = this.#redactPII(e.name);
-            sanitizedError.code = this.#redactPII(e.code);
+            const sanitizedError = new Error(this.#redactPII(e.message, recipients));
+            sanitizedError.name = this.#redactPII(e.name, recipients);
+            sanitizedError.code = this.#redactPII(e.code, recipients);
             sanitizedError.$metadata = {httpStatusCode: e.$metadata?.httpStatusCode};
 
             ghostError = new errors.EmailError({
                 statusCode: e.$metadata?.httpStatusCode || 500,
-                message: this.#createSESErrorMessage(e),
+                message: this.#createSESErrorMessage(e, recipients),
                 errorDetails,
-                context: `Amazon SES Error: ${this.#redactPII(e.message)}`,
+                context: `Amazon SES Error: ${this.#redactPII(e.message, recipients)}`,
                 help: 'https://ghost.org/docs/newsletters/#bulk-email-configuration',
                 code: 'BULK_EMAIL_SEND_FAILED',
                 err: sanitizedError

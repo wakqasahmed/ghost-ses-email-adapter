@@ -440,6 +440,29 @@ describe('SES Email Provider Adapter', function () {
                 .should.equal(emailData.subject);
         });
 
+        it('should keep long UTF-8 MIME headers within the line limit without folding Source', async function () {
+            emailData.recipients = [{
+                email: 'user1@example.com',
+                replacements: [{id: 'name', value: 'Alice'}]
+            }];
+            emailData.subject = 'こんにちは'.repeat(20);
+            emailData.from = `${'Jörg '.repeat(20)}<test@example.com>`;
+            emailData.replyTo = `${'Réponse '.repeat(20)}<reply@example.com>`;
+
+            await adapter.send(emailData, sendOptions);
+
+            const command = SendRawEmailCommand.firstCall.args[0];
+            const rawMessage = command.RawMessage.Data.toString();
+
+            ['Subject', 'From', 'Reply-To'].forEach((headerName) => {
+                const headerLines = rawMessage.match(new RegExp(`^${headerName}:.*(?:\\r\\n [^\\r\\n]*)*`, 'm'))[0].split('\r\n');
+                headerLines.forEach(line => line.length.should.be.belowOrEqual(76));
+            });
+
+            command.Source.should.match(/^[\x00-\x7F]+$/);
+            command.Source.should.not.match(/[\r\n]/);
+        });
+
         it('should throw EmailError on SES API error', async function () {
             const sesError = new Error('MessageRejected');
             sesError.name = 'MessageRejected';

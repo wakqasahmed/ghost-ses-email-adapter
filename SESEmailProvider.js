@@ -84,14 +84,14 @@ class SESEmailProvider extends EmailProviderBase {
         return String(value).replace(/[\r\n]/g, '');
     }
 
-    #encodeHeaderValue(value) {
+    #encodeHeaderValue(value, fold = true) {
         const sanitizedValue = this.#sanitizeHeader(value);
 
         if (!/[^\x20-\x7E]/.test(sanitizedValue)) {
             return sanitizedValue;
         }
 
-        const maxEncodedTextLength = 60;
+        const maxEncodedTextLength = 48;
         const maxUtf8Bytes = maxEncodedTextLength / 4 * 3;
         const encodedWords = [];
         let word = '';
@@ -114,19 +114,30 @@ class SESEmailProvider extends EmailProviderBase {
             encodedWords.push(`=?UTF-8?B?${Buffer.from(word, 'utf8').toString('base64')}?=`);
         }
 
-        return encodedWords.join('\r\n ');
+        return encodedWords.join(fold ? '\r\n ' : ' ');
     }
 
-    #encodeAddressHeader(value) {
+    #encodeAddressHeader(value, headerName, fold = true) {
         const sanitizedValue = this.#sanitizeHeader(value);
         const addressMatch = sanitizedValue.match(/^(.*?)(\s*<[^<>]+>)$/);
 
         if (!addressMatch) {
-            return this.#encodeHeaderValue(sanitizedValue);
+            return this.#encodeHeaderValue(sanitizedValue, fold);
         }
 
         const displayName = addressMatch[1].trim();
-        return displayName ? `${this.#encodeHeaderValue(displayName)}${addressMatch[2]}` : addressMatch[2].trim();
+        if (!displayName) {
+            return addressMatch[2].trim();
+        }
+
+        const encodedDisplayName = this.#encodeHeaderValue(displayName, fold);
+        const address = addressMatch[2].trim();
+
+        if (fold && (encodedDisplayName.includes('\r\n') || `${headerName}: ${encodedDisplayName} ${address}`.length > 76)) {
+            return `${encodedDisplayName}\r\n ${address}`;
+        }
+
+        return `${encodedDisplayName} ${address}`;
     }
 
     #getConfigurationSetName(options = {}) {
@@ -221,9 +232,9 @@ class SESEmailProvider extends EmailProviderBase {
         // Sanitize all header values to prevent header injection attacks
         const sanitizedFrom = this.#sanitizeHeader(from);
         const sanitizedTo = this.#sanitizeHeader(to);
-        const encodedFrom = this.#encodeAddressHeader(sanitizedFrom);
+        const encodedFrom = this.#encodeAddressHeader(sanitizedFrom, 'From');
         const encodedSubject = this.#encodeHeaderValue(subject);
-        const encodedReplyTo = this.#encodeAddressHeader(replyTo);
+        const encodedReplyTo = this.#encodeAddressHeader(replyTo, 'Reply-To');
 
         // Extract domain from 'from' address for Message-ID
         const domain = sanitizedFrom.match(/@([^>]+)/)?.[1] || 'localhost';
@@ -439,9 +450,10 @@ class SESEmailProvider extends EmailProviderBase {
         for (const batch of batches) {
             const bccList = batch.map(r => r.email).join(', ');
             const sanitizedFrom = this.#sanitizeHeader(from || this.#sesConfig.fromEmail);
-            const encodedFrom = this.#encodeAddressHeader(sanitizedFrom);
+            const encodedFrom = this.#encodeAddressHeader(sanitizedFrom, 'From');
+            const source = this.#encodeAddressHeader(sanitizedFrom, undefined, false);
             const encodedSubject = this.#encodeHeaderValue(subject);
-            const encodedReplyTo = this.#encodeAddressHeader(replyTo);
+            const encodedReplyTo = this.#encodeAddressHeader(replyTo, 'Reply-To');
 
             const encodedPlaintext = this.#encodeQuotedPrintable(plaintext || '');
             const encodedHtml = this.#encodeQuotedPrintable(html || '');
@@ -485,7 +497,7 @@ class SESEmailProvider extends EmailProviderBase {
             const rawMessage = mime.join('\r\n');
 
             const command = new SendRawEmailCommand({
-                Source: encodedFrom,
+                Source: source,
                 Destinations: batch.map(r => r.email),
                 RawMessage: {
                     Data: Buffer.from(rawMessage)
@@ -560,7 +572,7 @@ class SESEmailProvider extends EmailProviderBase {
 
             const {SendRawEmailCommand} = require('@aws-sdk/client-ses');
             const configurationSetName = this.#getConfigurationSetName(options);
-            const encodedFrom = this.#encodeAddressHeader(from || this.#sesConfig.fromEmail);
+            const encodedFrom = this.#encodeAddressHeader(from || this.#sesConfig.fromEmail, undefined, false);
             const successfulRecipients = this.#successfulRecipients.get(retryKey) || new Set();
             const pendingRecipients = recipients.filter(recipient => !successfulRecipients.has(recipient.email));
             const results = [];

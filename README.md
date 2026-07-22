@@ -10,15 +10,16 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 > "I think having an adapter mechanism would be enough for Ghost core. And self-hosters can use a 3rd party adapter to add SES or other providers to their Ghost sites." — Ghost core team, on #25367
 
-This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch (documented here) enables the adapter on self-hosted installs.
+This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch enables the adapter on self-hosted installs.
 
 ## Install on Ghost 6.x
 
-This interim setup targets Ghost **v6.53.0**. It requires the bundled wiring patch because stock Ghost does not yet resolve email adapters.
+This interim setup targets the **v6.53.0** runtime embedded in `ghost:6-alpine`. It requires the bundled wiring patch because stock Ghost does not yet resolve email adapters.
 
-1. Apply [`patches/ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) from the root of the Ghost v6.53.0 source tree:
+1. Apply [`patches/ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) from the running Ghost runtime directory (`/var/lib/ghost/current` in the official image):
 
    ```bash
+   cd /var/lib/ghost/current
    git apply /path/to/ghost-6.x-email-adapter-wiring.patch
    ```
 
@@ -74,7 +75,7 @@ USER root
 RUN apk add --no-cache git
 COPY patches/ghost-6.x-email-adapter-wiring.patch /tmp/ghost-email-adapter.patch
 RUN cd /var/lib/ghost/current \
-    && git apply -p3 /tmp/ghost-email-adapter.patch \
+    && git apply /tmp/ghost-email-adapter.patch \
     && npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
 USER node
 ```
@@ -83,11 +84,11 @@ Pass AWS credentials to the container through its secret manager or environment,
 
 ### Non-Docker
 
-For a normal Ghost installation, run the patch and npm-alias commands above from the installation root, update `config.production.json`, and restart the service using its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.
+For a normal Ghost installation, apply the patch from its active runtime directory (the directory equivalent to `/var/lib/ghost/current`), then install the npm alias there, update `config.production.json`, and restart through its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.
 
 ## Upstream status
 
-This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. Until then, re-check the patch against the exact Ghost version before each upgrade.
+This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. It only targets the embedded Ghost v6.53.0 runtime; re-check it against the exact runtime version before every Ghost upgrade.
 
 ## Credits
 

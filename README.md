@@ -12,6 +12,34 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch (documented here) enables the adapter on self-hosted installs.
 
+## Install
+
+The adapter is not yet functional; provider implementation and the interim Ghost wiring patch are tracked separately. This is the intended installation shape once they are available:
+
+```bash
+npm install ghost-ses-email-adapter
+```
+
+Install the package in the Ghost installation so Ghost can discover it as the `ses` email adapter.
+
+## Configuration
+
+After applying the documented Ghost email-adapter wiring patch, configure SES in Ghost's config file:
+
+```json
+{
+  "adapters": {
+    "email": {
+      "ses": {
+        "region": "eu-west-1"
+      }
+    }
+  }
+}
+```
+
+Use your deployment's normal AWS credential mechanism; never place AWS access keys in Ghost's config. Complete option and credential documentation will ship with the wiring patch.
+
 ## Credits
 
 The provider implementation is ported from the excellent work by [**@danielraffel**](https://github.com/danielraffel) in [TryGhost/Ghost#25367](https://github.com/TryGhost/Ghost/pull/25367) (MIT). This repo packages, maintains, and extends it (analytics, suppression support) as a standalone module.

@@ -60,7 +60,12 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
          "ses": {
            "region": "eu-west-1",
            "fromEmail": "news@example.com",
-           "configurationSet": "ghost-newsletter",
+           "configurationSets": {
+             "openAndClick": "ghost-track-open-and-click",
+             "openOnly": "ghost-track-open-only",
+             "clickOnly": "ghost-track-click-only",
+             "disabled": "ghost-track-disabled"
+           },
            "accessKeyId": "AWS_ACCESS_KEY_ID",
            "secretAccessKey": "AWS_SECRET_ACCESS_KEY"
          }
@@ -70,6 +75,10 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
    ```
 
    `accessKeyId` and `secretAccessKey` are optional credentials. Prefer the AWS SDK default credential provider chain: omit both keys and supply an IAM role, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables, or another supported AWS credential source. Never commit real credentials to Ghost configuration.
+
+   Create the four SES configuration sets shown above. Their event destinations must respectively publish open-and-click, open-only, click-only, and no open/click events. The adapter selects the matching set for Ghost's `openTrackingEnabled` and `clickTrackingEnabled` flags. A legacy `configurationSet` remains supported only when both flags are enabled; configure a `disabled` set to make opt-outs explicit.
+
+   Ghost retries a failed provider `send()` call for the entire provider batch, so this adapter advertises one recipient per batch. The adapter coalesces concurrent identical sends and retains successful recipients and bulk batches during an in-process retry. It identifies retries by Ghost's `emailId`, a caller-provided `idempotencyKey`, or an identical send payload. Retry state is capped at 1,000 keys (oldest first) to bound memory and in-process recipient-data retention. This protection is not durable across process restarts; callers needing durable idempotency must provide it outside the adapter.
 
 4. Restart Ghost after applying the patch, installing the adapter, and updating configuration.
 

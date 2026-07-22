@@ -7,7 +7,10 @@ class EmailProviderBase {
             writable: false
         });
 
-        this.config = config || {};
+        Object.defineProperty(this, 'config', {
+            value: config || {},
+            writable: true
+        });
     }
 
     async send() {

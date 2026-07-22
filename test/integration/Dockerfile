@@ -1,6 +1,6 @@
 ARG PACKAGE_TARBALL
 
-FROM ghost:6.53.0-alpine
+FROM ghost:6-alpine
 
 ARG PACKAGE_TARBALL
 

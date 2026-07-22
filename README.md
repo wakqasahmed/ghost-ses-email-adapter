@@ -106,6 +106,10 @@ For a normal Ghost installation, apply the patch from its active runtime directo
 
 This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. It was last verified against the embedded Ghost v6.53.0 runtime; re-run the integration check before every Ghost upgrade.
 
+## SES analytics
+
+[`docs/analytics-setup.md`](docs/analytics-setup.md) explains the human-operated SES → SNS → SQS setup and the `emailAnalytics.ses` configuration. The current interim patch and issue #5 enable only the SES sending provider; Ghost still needs separate email-analytics adapter wiring before it can activate `SESAnalyticsProvider`.
+
 ## Credits
 
 The provider implementation is ported from the excellent work by [**@danielraffel**](https://github.com/danielraffel) in [TryGhost/Ghost#25367](https://github.com/TryGhost/Ghost/pull/25367) (MIT). This repo packages, maintains, and extends it (analytics, suppression support) as a standalone module.

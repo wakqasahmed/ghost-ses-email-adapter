@@ -1,0 +1,80 @@
+# Ghost email adapter wiring patch
+#
+# Target runtime: ghost:5.130.6-alpine
+# Apply from /var/lib/ghost/current with one command:
+#   git apply /path/to/ghost-5.x-email-adapter-wiring.patch
+
+diff --git a/core/server/adapters/email/email-provider-base.js b/core/server/adapters/email/email-provider-base.js
+new file mode 100644
+--- /dev/null
++++ b/core/server/adapters/email/email-provider-base.js
+@@ -0,0 +1,22 @@
++'use strict';
++
++const errors = require('@tryghost/errors');
++
++class EmailProviderBase {
++    constructor(config) {
++        Object.defineProperty(this, 'requiredFns', {
++            value: ['send'],
++            writable: false
++        });
++
++        this.config = config || {};
++    }
++
++    async send() {
++        throw new errors.IncorrectUsageError({
++            message: 'send() must be implemented by email provider adapter'
++        });
++    }
++}
++
++module.exports = EmailProviderBase;
+diff --git a/core/server/services/adapter-manager/index.js b/core/server/services/adapter-manager/index.js
+--- a/core/server/services/adapter-manager/index.js
++++ b/core/server/services/adapter-manager/index.js
+@@ -12,6 +12,7 @@ const adapterManager = new AdapterManager({
+     ]
+ });
+ 
++adapterManager.registerAdapter('email', require('../../adapters/email/email-provider-base'));
+ adapterManager.registerAdapter('storage', require('ghost-storage-base'));
+ adapterManager.registerAdapter('scheduling', require('../../adapters/scheduling/scheduling-base'));
+ adapterManager.registerAdapter('sso', require('../../adapters/sso/SSOBase'));
+diff --git a/core/server/services/email-service/EmailServiceWrapper.js b/core/server/services/email-service/EmailServiceWrapper.js
+--- a/core/server/services/email-service/EmailServiceWrapper.js
++++ b/core/server/services/email-service/EmailServiceWrapper.js
+@@ -22,6 +22,7 @@ class EmailServiceWrapper {
+         const BatchSendingService = require('./BatchSendingService');
+         const EmailSegmenter = require('./EmailSegmenter');
+         const MailgunEmailProvider = require('./MailgunEmailProvider');
++        const adapterManager = require('../adapter-manager');
+ 
+         const {Post, Newsletter, Email, EmailBatch, EmailRecipient, Member} = require('../../models');
+         const MailgunClient = require('../lib/MailgunClient');
+@@ -80,10 +81,12 @@ class EmailServiceWrapper {
+             }
+         });
+ 
+-        const mailgunEmailProvider = new MailgunEmailProvider({
+-            mailgunClient,
+-            errorHandler
+-        });
++        const emailProvider = configService.get('adapters:email')
++            ? adapterManager.getAdapter('email')
++            : new MailgunEmailProvider({
++                mailgunClient,
++                errorHandler
++            });
+ 
+         const emailRenderer = new EmailRenderer({
+             settingsCache,
+@@ -106,6 +109,6 @@ class EmailServiceWrapper {
+         });
+ 
+         const sendingService = new SendingService({
+-            emailProvider: mailgunEmailProvider,
++            emailProvider,
+             emailRenderer
+         });

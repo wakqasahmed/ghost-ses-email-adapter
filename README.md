@@ -12,6 +12,15 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch enables the adapter on self-hosted installs.
 
+## Supported Ghost versions
+
+| Ghost version | Status | Verified runtime | Interim wiring patch | Disposable check |
+| --- | --- | --- | --- | --- |
+| 6.x | Supported | `ghost:6-alpine` (v6.53.0) | [`ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) | `test/integration/ghost-6.sh` |
+| 5.130.6 | Supported | `ghost:5.130.6-alpine` | [`ghost-5.x-email-adapter-wiring.patch`](patches/ghost-5.x-email-adapter-wiring.patch) | `test/integration/ghost-5.sh` |
+
+Both versions need their matching patch until Ghost core ships third-party email adapter wiring. Other Ghost 5.x releases have not been verified; re-run the Ghost 5 disposable check against the exact version before using the patch. Re-run the matching disposable check before every Ghost upgrade.
+
 ## Install on Ghost 6.x
 
 This interim setup uses the bundled wiring patch because stock Ghost does not yet resolve email adapters. The patch was last verified against the **v6.53.0** runtime embedded in `ghost:6-alpine`; re-run the disposable integration check before applying it to an updated Ghost runtime.
@@ -101,6 +110,22 @@ The harness deliberately uses the floating `ghost:6-alpine` image, so each run t
 ### Non-Docker
 
 For a normal Ghost installation, apply the patch from its active runtime directory (the directory equivalent to `/var/lib/ghost/current`), then install the npm alias there, update `config.production.json`, and restart through its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.
+
+## Install on Ghost 5.x
+
+Ghost 5.130.6 uses the same adapter configuration and installation methods as Ghost 6, but its runtime files have different casing and adapter registration. Apply [`patches/ghost-5.x-email-adapter-wiring.patch`](patches/ghost-5.x-email-adapter-wiring.patch) from `/var/lib/ghost/current`, then complete steps 2–4 in the Ghost 6 instructions above. Re-validate the patch against the exact runtime before using it on another Ghost 5.x release.
+
+Run the matching disposable check before using the patch:
+
+```bash
+test/integration/ghost-5.sh
+```
+
+It prints the following marker after Ghost starts and the patched email service wires the SES provider into `SendingService`:
+
+```text
+EMAIL_PROVIDER=SESEmailProvider
+```
 
 ## Upstream status
 

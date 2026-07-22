@@ -82,6 +82,22 @@ USER node
 
 Pass AWS credentials to the container through its secret manager or environment, and mount/provide the same `adapters.email` configuration shown above. Do not bake credentials into the image or Dockerfile.
 
+### Disposable integration check
+
+Run the repository's Ghost 6.53.0 integration harness with Docker installed:
+
+```bash
+test/integration/ghost-6.sh
+```
+
+It builds a throwaway `ses-adapter-test-*` image using a local `npm pack` archive, starts Ghost with SQLite and obvious fake AWS credentials, waits for Ghost to boot, then prints:
+
+```text
+ADAPTER_CONSTRUCTOR=SESEmailProvider
+```
+
+The harness uses a tmpfs-backed Ghost content directory and its trap removes only the image, container, and temporary directory created by that run. Run it twice to confirm repeatability; it never sends through SES.
+
 ### Non-Docker
 
 For a normal Ghost installation, apply the patch from its active runtime directory (the directory equivalent to `/var/lib/ghost/current`), then install the npm alias there, update `config.production.json`, and restart through its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.

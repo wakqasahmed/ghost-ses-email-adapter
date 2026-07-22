@@ -1,6 +1,6 @@
 {
   "name": "ghost-ses-email-adapter",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Amazon SES bulk email provider adapter for Ghost",
   "main": "index.js",
   "files": [

@@ -3,6 +3,10 @@ const errors = require('@tryghost/errors');
 const debug = require('@tryghost/debug')('email-service:ses-adapter');
 const crypto = require('node:crypto');
 
+// Keep retry recipient state short-lived in practice and bounded to 1,000 keys to limit memory and PII retention.
+const MAX_RETRY_STATE_ENTRIES = 1000;
+const MAX_BCC_HEADER_LINE_LENGTH = 900;
+
 /**
  * Amazon SES Email Provider Adapter
  *
@@ -15,6 +19,7 @@ class SESEmailProvider extends EmailProviderBase {
     #sesConfig;
     #errorHandler;
     #successfulRecipients = new Map();
+    #inFlightSends = new Map();
 
     /**
      * @param {Object} config - Adapter configuration
@@ -197,6 +202,36 @@ class SESEmailProvider extends EmailProviderBase {
         });
 
         return `payload:${crypto.createHash('sha256').update(payload).digest('hex')}`;
+    }
+
+    #rememberSuccessfulRecipients(retryKey, successfulRecipients) {
+        this.#successfulRecipients.delete(retryKey);
+        this.#successfulRecipients.set(retryKey, successfulRecipients);
+
+        if (this.#successfulRecipients.size > MAX_RETRY_STATE_ENTRIES) {
+            this.#successfulRecipients.delete(this.#successfulRecipients.keys().next().value);
+        }
+    }
+
+    #formatBccHeader(recipients) {
+        const addresses = recipients.map(recipient => this.#sanitizeHeader(recipient.email));
+        const lines = [];
+        let line = 'Bcc:';
+
+        for (const [index, address] of addresses.entries()) {
+            const value = index === addresses.length - 1 ? address : `${address},`;
+            const candidate = `${line} ${value}`;
+
+            if (line !== 'Bcc:' && Buffer.byteLength(candidate) > MAX_BCC_HEADER_LINE_LENGTH) {
+                lines.push(line);
+                line = ` ${value}`;
+            } else {
+                line = candidate;
+            }
+        }
+
+        lines.push(line);
+        return lines.join('\r\n');
     }
 
     /**
@@ -448,7 +483,7 @@ class SESEmailProvider extends EmailProviderBase {
         debug(`sending bulk email to ${recipients.length} recipients in ${batches.length} batches`);
 
         for (const batch of batches) {
-            const bccList = batch.map(r => r.email).join(', ');
+            const bccHeader = this.#formatBccHeader(batch);
             const sanitizedFrom = this.#sanitizeHeader(from || this.#sesConfig.fromEmail);
             const encodedFrom = this.#encodeAddressHeader(sanitizedFrom, 'From');
             const source = this.#encodeAddressHeader(sanitizedFrom, undefined, false);
@@ -465,7 +500,7 @@ class SESEmailProvider extends EmailProviderBase {
             let mime = [
                 `From: ${encodedFrom}`,
                 `To: undisclosed-recipients:;`,
-                `Bcc: ${bccList}`,
+                bccHeader,
                 `Subject: ${encodedSubject}`,
                 `Date: ${new Date().toUTCString()}`,
                 `Message-ID: ${messageId}`
@@ -514,7 +549,7 @@ class SESEmailProvider extends EmailProviderBase {
             const response = await this.#sesClient.send(command);
             results.push(response.MessageId);
             batch.forEach(recipient => successfulRecipients.add(recipient.email));
-            this.#successfulRecipients.set(retryKey, successfulRecipients);
+            this.#rememberSuccessfulRecipients(retryKey, successfulRecipients);
         }
 
         this.#successfulRecipients.delete(retryKey);
@@ -558,14 +593,42 @@ class SESEmailProvider extends EmailProviderBase {
             recipients = [],
             replacementDefinitions = []
         } = data;
+        const retryKey = this.#getRetryKey({emailId, idempotencyKey, subject, html, plaintext, from, replyTo, recipients, replacementDefinitions, options});
+        const inFlightSend = this.#inFlightSends.get(retryKey);
+
+        if (inFlightSend) {
+            return inFlightSend;
+        }
+
+        const sendPromise = this.#send(data, options, retryKey);
+        this.#inFlightSends.set(retryKey, sendPromise);
+
+        try {
+            return await sendPromise;
+        } finally {
+            if (this.#inFlightSends.get(retryKey) === sendPromise) {
+                this.#inFlightSends.delete(retryKey);
+            }
+        }
+    }
+
+    async #send(data, options, retryKey) {
+        const {
+            subject,
+            html,
+            plaintext,
+            from,
+            replyTo,
+            emailId,
+            recipients = [],
+            replacementDefinitions = []
+        } = data;
 
         const startTime = Date.now();
         debug(`sending message to ${recipients.length} recipients with ${replacementDefinitions.length} replacements`);
 
         try {
             const hasPersonalization = recipients.some(recipient => recipient.replacements?.length);
-            const retryKey = this.#getRetryKey({emailId, idempotencyKey, subject, html, plaintext, from, replyTo, recipients, replacementDefinitions, options});
-
             if (!hasPersonalization) {
                 return await this.#sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options});
             }
@@ -618,7 +681,7 @@ class SESEmailProvider extends EmailProviderBase {
             }
 
             if (failedResult) {
-                this.#successfulRecipients.set(retryKey, successfulRecipients);
+                this.#rememberSuccessfulRecipients(retryKey, successfulRecipients);
                 throw failedResult.reason;
             }
 

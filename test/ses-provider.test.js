@@ -116,6 +116,22 @@ describe('SES Email Provider Adapter', function () {
             should.exist(adapter);
         });
 
+        it('should not serialize SES credentials', function () {
+            const adapter = new SESEmailProvider({
+                ses: {
+                    region: 'us-east-1',
+                    accessKeyId: 'test-access-key-id',
+                    secretAccessKey: 'test-secret-access-key',
+                    fromEmail: 'test@example.com'
+                }
+            });
+
+            const serialized = `${JSON.stringify(adapter)} ${require('node:util').inspect(adapter)}`;
+
+            serialized.should.not.containEql('test-access-key-id');
+            serialized.should.not.containEql('test-secret-access-key');
+        });
+
         it('should store errorHandler from config', function () {
             const adapter = new SESEmailProvider({
                 ses: {
@@ -332,6 +348,77 @@ describe('SES Email Provider Adapter', function () {
             SendRawEmailCommand.getCall(2).args[0].Destinations.should.deepEqual(['user51@example.com']);
         });
 
+        it('should coalesce concurrent sends with the same retry key', async function () {
+            let resolveSend;
+            sesClient.send.callsFake(function () {
+                return new Promise(resolve => {
+                    resolveSend = resolve;
+                });
+            });
+
+            const firstSend = adapter.send(emailData, sendOptions);
+            const secondSend = adapter.send(emailData, sendOptions);
+
+            sesClient.send.calledOnce.should.be.true();
+            resolveSend({MessageId: 'shared-message-id'});
+
+            const [firstResult, secondResult] = await Promise.all([firstSend, secondSend]);
+
+            sesClient.send.calledOnce.should.be.true();
+            firstResult.should.deepEqual({id: 'shared-message-id'});
+            secondResult.should.deepEqual({id: 'shared-message-id'});
+        });
+
+        it('should start a new send after an in-flight send has completed', async function () {
+            await adapter.send(emailData, sendOptions);
+            await adapter.send(emailData, sendOptions);
+
+            sesClient.send.callCount.should.equal(2);
+        });
+
+        it('should evict the oldest partial retry state after the retry cache reaches its limit', async function () {
+            emailData.recipients = [
+                {email: 'sent@example.com', replacements: [{id: 'name', value: 'Sent'}]},
+                {email: 'failed@example.com', replacements: [{id: 'name', value: 'Failed'}]}
+            ];
+            sesClient.send.onFirstCall().resolves({MessageId: 'sent-message-id'});
+            sesClient.send.onSecondCall().rejects(new Error('temporary SES failure'));
+
+            await adapter.send(emailData, sendOptions).should.be.rejected();
+
+            sesClient.send.reset();
+            let retrySendCount = 0;
+            sesClient.send.callsFake(function () {
+                retrySendCount += 1;
+
+                if (retrySendCount % 2 === 1) {
+                    return Promise.resolve({MessageId: 'partial-message-id'});
+                }
+
+                return Promise.reject(new Error('temporary SES failure'));
+            });
+
+            for (let index = 0; index < 1000; index += 1) {
+                await adapter.send({
+                    ...emailData,
+                    emailId: `failed-retry-${index}`,
+                    recipients: [
+                        {email: `sent-retry-${index}@example.com`, replacements: [{id: 'name', value: 'Sent'}]},
+                        {email: `failed-retry-${index}@example.com`, replacements: [{id: 'name', value: 'Failed'}]}
+                    ]
+                }, sendOptions).should.be.rejected();
+            }
+
+            sesClient.send.reset();
+            sesClient.send.resolves({MessageId: 'retry-message-id'});
+
+            await adapter.send(emailData, sendOptions);
+
+            sesClient.send.callCount.should.equal(2);
+            SendRawEmailCommand.getCall(0).args[0].Destinations.should.deepEqual(['sent@example.com']);
+            SendRawEmailCommand.getCall(1).args[0].Destinations.should.deepEqual(['failed@example.com']);
+        });
+
         it('should limit personalized direct sends to ten concurrent SES requests', async function () {
             emailData.recipients = Array.from({length: 11}, (_, index) => ({
                 email: `user${index + 1}@example.com`,
@@ -416,6 +503,35 @@ describe('SES Email Provider Adapter', function () {
             const rawMessage = command.RawMessage.Data.toString();
             command.Source.should.equal(rawMessage.match(/^From: (.+)$/m)[1]);
             command.Source.should.match(/^=\?UTF-8\?B\?.+\?= <test@example\.com>$/);
+        });
+
+        it('should sanitize recipient email addresses in bulk Bcc headers', async function () {
+            emailData.recipients = [
+                {email: 'member@example.com\r\nX-Injected: value'},
+                {email: 'other@example.com'}
+            ];
+
+            await adapter.send(emailData, sendOptions);
+
+            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
+            const bccHeader = rawMessage.match(/^Bcc: ([\s\S]*?)\r\nSubject:/m)[1];
+
+            bccHeader.should.equal('member@example.comX-Injected: value, other@example.com');
+            rawMessage.should.not.match(/^X-Injected:/m);
+        });
+
+        it('should fold long bulk Bcc headers below the RFC 5322 line limit', async function () {
+            emailData.recipients = Array.from({length: 50}, (_, index) => ({
+                email: `member-${index}-${'long-local-part'.repeat(4)}@example.com`
+            }));
+
+            await adapter.send(emailData, sendOptions);
+
+            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
+            const bccHeader = rawMessage.match(/^Bcc:.*(?:\r\n [^\r\n]*)*/m)[0];
+
+            bccHeader.should.containEql('\r\n ');
+            bccHeader.split('\r\n').forEach(line => Buffer.byteLength(line).should.be.belowOrEqual(900));
         });
 
         it('should fold long RFC 2047 encoded subject values into valid encoded words', async function () {

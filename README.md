@@ -78,7 +78,7 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
 
    Create the four SES configuration sets shown above. Their event destinations must respectively publish open-and-click, open-only, click-only, and no open/click events. The adapter selects the matching set for Ghost's `openTrackingEnabled` and `clickTrackingEnabled` flags. A legacy `configurationSet` remains supported only when both flags are enabled; configure a `disabled` set to make opt-outs explicit.
 
-   Ghost retries a failed provider `send()` call for the entire provider batch, so this adapter advertises one recipient per batch. The adapter also retains successful recipients and bulk batches during an in-process retry. It identifies retries by Ghost's `emailId`, a caller-provided `idempotencyKey`, or an identical send payload. This protection is not durable across process restarts; callers needing durable idempotency must provide it outside the adapter.
+   Ghost retries a failed provider `send()` call for the entire provider batch, so this adapter advertises one recipient per batch. The adapter coalesces concurrent identical sends and retains successful recipients and bulk batches during an in-process retry. It identifies retries by Ghost's `emailId`, a caller-provided `idempotencyKey`, or an identical send payload. Retry state is capped at 1,000 keys (oldest first) to bound memory and in-process recipient-data retention. This protection is not durable across process restarts; callers needing durable idempotency must provide it outside the adapter.
 
 4. Restart Ghost after applying the patch, installing the adapter, and updating configuration.
 

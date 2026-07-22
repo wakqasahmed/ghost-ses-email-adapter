@@ -43,7 +43,7 @@ jobs:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
           llm_model: ${{ vars.OCR_LLM_MODEL }}
-          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          llm_use_anthropic: ${{ vars.OCR_USE_ANTHROPIC }}
           sticky_summary: 'true'
           incremental: 'true'
           base_ref: ${{ steps.pr.outputs.base_ref }}

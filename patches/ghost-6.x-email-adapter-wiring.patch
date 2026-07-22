@@ -1,0 +1,87 @@
+# Ghost email adapter wiring patch
+#
+# Target: Ghost v6.53.0 (fe231002ca5c9c938e0e719727b483f14ebd5d00)
+# Generated with git diff from a clean checkout of the target tag.
+# Apply from the Ghost source root with:
+#   git apply patches/ghost-6.x-email-adapter-wiring.patch
+
+diff --git a/ghost/core/core/server/adapters/email/email-provider-base.ts b/ghost/core/core/server/adapters/email/email-provider-base.ts
+new file mode 100644
+index 0000000000..383b461e2f
+--- /dev/null
++++ b/ghost/core/core/server/adapters/email/email-provider-base.ts
+@@ -0,0 +1,16 @@
++import errors from '@tryghost/errors';
++
++export class EmailProviderBase {
++    public readonly requiredFns = ['send'];
++    public readonly config: object;
++
++    constructor(config: object = {}) {
++        this.config = config;
++    }
++
++    async send(): Promise<never> {
++        throw new errors.IncorrectUsageError({
++            message: 'send() must be implemented by email provider adapter'
++        });
++    }
++}
+diff --git a/ghost/core/core/server/services/adapter-manager/index.ts b/ghost/core/core/server/services/adapter-manager/index.ts
+index 2a2891806b..fa10053144 100644
+--- a/ghost/core/core/server/services/adapter-manager/index.ts
++++ b/ghost/core/core/server/services/adapter-manager/index.ts
+@@ -4,6 +4,7 @@ import {SSOBase} from '@tryghost/adapter-base-sso';
+ import BaseCache from '@tryghost/adapter-base-cache';
+ import { RedirectsStoreBase } from '@tryghost/adapter-base-redirects';
+ import { RouteSettingsStoreBase } from '@tryghost/adapter-base-route-settings';
++import {EmailProviderBase} from '../../adapters/email/email-provider-base';
+ 
+ import {AdapterManager} from './adapter-manager';
+ import config from '../../../shared/config';
+@@ -24,6 +25,7 @@ const adapterManager = new AdapterManager({
+         scheduling: SchedulingBase,
+         sso: SSOBase,
+         cache: BaseCache,
++        email: EmailProviderBase,
+         redirects: RedirectsStoreBase,
+         'route-settings': RouteSettingsStoreBase
+     }
+diff --git a/ghost/core/core/server/services/email-service/email-service-wrapper.js b/ghost/core/core/server/services/email-service/email-service-wrapper.js
+index 0cce5401c9..a42b90404f 100644
+--- a/ghost/core/core/server/services/email-service/email-service-wrapper.js
++++ b/ghost/core/core/server/services/email-service/email-service-wrapper.js
+@@ -22,6 +22,7 @@ class EmailServiceWrapper {
+         const BatchSendingService = require('./batch-sending-service');
+         const EmailSegmenter = require('./email-segmenter');
+         const MailgunEmailProvider = require('./mailgun-email-provider');
++        const adapterManager = require('../adapter-manager');
+         const {DomainWarmingService} = require('./domain-warming-service');
+ 
+         const {Post, Newsletter, Email, EmailBatch, EmailRecipient, Member} = require('../../models');
+@@ -68,10 +69,12 @@ class EmailServiceWrapper {
+             i18n.changeLanguage(model.get('value'));
+         });
+ 
+-        const mailgunEmailProvider = new MailgunEmailProvider({
+-            mailgunClient,
+-            errorHandler
+-        });
++        const emailProvider = configService.get('adapters:email')
++            ? adapterManager.getAdapter('email')
++            : new MailgunEmailProvider({
++                mailgunClient,
++                errorHandler
++            });
+ 
+         const emailRenderer = new EmailRenderer({
+             settingsCache,
+@@ -97,7 +100,7 @@ class EmailServiceWrapper {
+         });
+ 
+         const sendingService = new SendingService({
+-            emailProvider: mailgunEmailProvider,
++            emailProvider,
+             emailRenderer,
+             emailAddressService: emailAddressService.service
+         });

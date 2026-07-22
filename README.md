@@ -12,33 +12,82 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch (documented here) enables the adapter on self-hosted installs.
 
-## Install
+## Install on Ghost 6.x
 
-The adapter is not yet functional; provider implementation and the interim Ghost wiring patch are tracked separately. This is the intended installation shape once they are available:
+This interim setup targets Ghost **v6.53.0**. It requires the bundled wiring patch because stock Ghost does not yet resolve email adapters.
 
-```bash
-npm install ghost-ses-email-adapter
+1. Apply [`patches/ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) from the root of the Ghost v6.53.0 source tree:
+
+   ```bash
+   git apply /path/to/ghost-6.x-email-adapter-wiring.patch
+   ```
+
+2. Install the adapter using one discovery method.
+
+   **npm alias** — run this from the Ghost installation root (the directory containing `current/`). The alias makes the package resolvable as the configured `ses` adapter:
+
+   ```bash
+   cd current
+   npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
+   ```
+
+   **Content adapter** — extract the package at exactly `content/adapters/email/ses/` under the Ghost installation root:
+
+   ```bash
+   mkdir -p content/adapters/email/ses
+   npm pack ghost-ses-email-adapter
+   tar -xzf ghost-ses-email-adapter-*.tgz --strip-components=1 -C content/adapters/email/ses
+   npm install --omit=dev --prefix content/adapters/email/ses
+   ```
+
+3. Add this block to `config.production.json`, replacing the example values. `active` must be `ses`.
+
+   ```json
+   {
+     "adapters": {
+       "email": {
+         "active": "ses",
+         "ses": {
+           "region": "eu-west-1",
+           "fromEmail": "news@example.com",
+           "configurationSet": "ghost-newsletter",
+           "accessKeyId": "AWS_ACCESS_KEY_ID",
+           "secretAccessKey": "AWS_SECRET_ACCESS_KEY"
+         }
+       }
+     }
+   }
+   ```
+
+   `accessKeyId` and `secretAccessKey` are optional credentials. Prefer the AWS SDK default credential provider chain: omit both keys and supply an IAM role, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables, or another supported AWS credential source. Never commit real credentials to Ghost configuration.
+
+4. Restart Ghost after applying the patch, installing the adapter, and updating configuration.
+
+### Docker
+
+Build a derived image so the patch and adapter are present on every container start. The following Dockerfile assumes this repository is the build context:
+
+```dockerfile
+FROM ghost:6.53.0-alpine
+
+USER root
+RUN apk add --no-cache git
+COPY patches/ghost-6.x-email-adapter-wiring.patch /tmp/ghost-email-adapter.patch
+RUN cd /var/lib/ghost/current \
+    && git apply /tmp/ghost-email-adapter.patch \
+    && npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
+USER node
 ```
 
-Install the package in the Ghost installation so Ghost can discover it as the `ses` email adapter.
+Pass AWS credentials to the container through its secret manager or environment, and mount/provide the same `adapters.email` configuration shown above. Do not bake credentials into the image or Dockerfile.
 
-## Configuration
+### Non-Docker
 
-After applying the documented Ghost email-adapter wiring patch, configure SES in Ghost's config file:
+For a normal Ghost installation, run the patch and npm-alias commands above from the installation root, update `config.production.json`, and restart the service using its normal service manager. Use the content-adapter path only when you intentionally manage adapters under `content/adapters/`.
 
-```json
-{
-  "adapters": {
-    "email": {
-      "ses": {
-        "region": "eu-west-1"
-      }
-    }
-  }
-}
-```
+## Upstream status
 
-Use your deployment's normal AWS credential mechanism; never place AWS access keys in Ghost's config. Complete option and credential documentation will ship with the wiring patch.
+This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. Until then, re-check the patch against the exact Ghost version before each upgrade.
 
 ## Credits
 

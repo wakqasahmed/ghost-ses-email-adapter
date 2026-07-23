@@ -21,6 +21,26 @@ This package is that community-maintained SES provider. A companion minimal PR t
 
 Both versions need their matching patch until Ghost core ships third-party email adapter wiring. Other Ghost 5.x releases have not been verified; re-run the Ghost 5 disposable check against the exact version before using the patch. Re-run the matching disposable check before every Ghost upgrade.
 
+## Choose an installation method
+
+**Recommended for deployments: install the npm package.** It gives Ghost a
+versioned adapter dependency and does not require this repository to remain on
+the host:
+
+```bash
+cd current
+npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
+```
+
+The `ses` alias must match `adapters.email.active`. See [Install on Ghost
+6.x](#install-on-ghost-6x) for the matching configuration and production
+setup.
+
+**Use a source checkout only for local adapter development.** The Docker
+development workflow below bind-mounts this repository into the Ghost
+container, so code changes are available immediately. It is not the
+recommended production installation method.
+
 ## Local development with the Ghost monorepo
 
 For local development against the Ghost 6 adapter-wiring branch, use its
@@ -78,9 +98,11 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
    git apply /path/to/ghost-6.x-email-adapter-wiring.patch
    ```
 
-2. Install the adapter using one discovery method.
+2. Install the adapter using one discovery method. The npm package alias is
+   recommended for deployments; use the content-adapter method only when you
+   intentionally manage adapter files under `content/adapters/`.
 
-   **npm alias** — run this from the Ghost installation root (the directory containing `current/`). The alias makes the package resolvable as the configured `ses` adapter:
+   **Recommended: npm package alias** — run this from the Ghost installation root (the directory containing `current/`). The alias makes the package resolvable as the configured `ses` adapter:
 
    ```bash
    cd current

@@ -21,6 +21,73 @@ This package is that community-maintained SES provider. A companion minimal PR t
 
 Both versions need their matching patch until Ghost core ships third-party email adapter wiring. Other Ghost 5.x releases have not been verified; re-run the Ghost 5 disposable check against the exact version before using the patch. Re-run the matching disposable check before every Ghost upgrade.
 
+## Choose an installation method
+
+**Recommended for deployments: install the npm package.** It gives Ghost a
+versioned adapter dependency and does not require this repository to remain on
+the host:
+
+```bash
+cd current
+npm install --omit=dev --no-save ses@npm:ghost-ses-email-adapter
+```
+
+The `ses` alias must match `adapters.email.active`. See [Install on Ghost
+6.x](#install-on-ghost-6x) for the matching configuration and production
+setup.
+
+**Use a source checkout only for local adapter development.** The Docker
+development workflow below bind-mounts this repository into the Ghost
+container, so code changes are available immediately. It is not the
+recommended production installation method.
+
+## Local development with the Ghost monorepo
+
+For local development against the Ghost 6 adapter-wiring branch, use its
+`compose.dev.ses.yaml` overlay. It bind-mounts this checkout directly into the
+Ghost development container at
+`/home/ghost/ghost/core/content/adapters/email/ses`, which is the path Ghost
+searches for content adapters. Do not create a host-specific absolute symlink
+inside the Ghost checkout: it cannot resolve inside the container.
+
+The overlay is introduced by [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553).
+Check out that branch before starting this workflow.
+
+1. Install this checkout's dependencies so they are present in the bind mount:
+
+   ```bash
+   npm ci
+   ```
+
+2. From the Ghost checkout, start development with the adapter overlay. The
+   `SES_ADAPTER_PATH` default is a sibling `../ghost-ses-email-adapter`
+   checkout, and can be changed for another location:
+
+   ```bash
+   SES_ADAPTER_PATH=../ghost-ses-email-adapter \
+   SES_FROM_EMAIL=news@example.com \
+   DEV_COMPOSE_FILES='-f compose.dev.ses.yaml' \
+   pnpm dev
+   ```
+
+   Set `SES_REGION` and `SES_FROM_EMAIL` for the sender under test. Provide
+   AWS credentials through the AWS SDK default credential provider chain; do
+   not commit credentials or local configuration.
+
+3. In another terminal, verify Ghost is healthy and has not failed adapter
+   resolution before using the browser:
+
+   ```bash
+   SES_ADAPTER_PATH=../ghost-ses-email-adapter \
+   docker compose -f compose.dev.yaml -f compose.dev.ses.yaml up -d --wait
+   docker logs ghost-dev
+   ```
+
+   Ghost must remain running and healthy, and the logs must not contain
+   `Unable to find email adapter ses`. Then open
+   `http://localhost:2368/ghost`, create a test newsletter, and send a test
+   email.
+
 ## Install on Ghost 6.x
 
 This interim setup uses the bundled wiring patch because stock Ghost does not yet resolve email adapters. The patch was last verified against the **v6.53.0** runtime embedded in `ghost:6-alpine`; re-run the disposable integration check before applying it to an updated Ghost runtime.
@@ -32,9 +99,11 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
    git apply /path/to/ghost-6.x-email-adapter-wiring.patch
    ```
 
-2. Install the adapter using one discovery method.
+2. Install the adapter using one discovery method. The npm package alias is
+   recommended for deployments; use the content-adapter method only when you
+   intentionally manage adapter files under `content/adapters/`.
 
-   **npm alias** — run this from the Ghost installation root (the directory containing `current/`). The alias makes the package resolvable as the configured `ses` adapter:
+   **Recommended: npm package alias** — run this from the Ghost installation root (the directory containing `current/`). The alias makes the package resolvable as the configured `ses` adapter:
 
    ```bash
    cd current

@@ -65,6 +65,7 @@ Check out that branch before starting this workflow.
 
    ```bash
    SES_ADAPTER_PATH=../ghost-ses-email-adapter \
+   SES_FROM_EMAIL=news@example.com \
    DEV_COMPOSE_FILES='-f compose.dev.ses.yaml' \
    pnpm dev
    ```

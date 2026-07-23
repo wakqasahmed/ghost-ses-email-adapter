@@ -738,7 +738,7 @@ describe('SES Email Provider Adapter', function () {
             adapter.send.should.be.a.Function();
         });
 
-        it('should have requiredFns array with send', function () {
+        it('should have the complete email provider contract', function () {
             const adapter = new SESEmailProvider({
                 ses: {
                     region: 'us-east-1',
@@ -747,7 +747,7 @@ describe('SES Email Provider Adapter', function () {
             });
 
             adapter.requiredFns.should.be.an.Array();
-            adapter.requiredFns.should.containEql('send');
+            adapter.requiredFns.should.deepEqual(['send', 'getMaximumRecipients', 'getTargetDeliveryWindow']);
         });
     });
 

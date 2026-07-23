@@ -62,7 +62,7 @@ class SESSuppressionProvider {
             }
 
             debug(`Unable to get SES suppression data: ${err.message}`);
-            return {suppressed: false, info: null};
+            throw err;
         }
     }
 

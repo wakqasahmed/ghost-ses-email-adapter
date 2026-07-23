@@ -95,6 +95,14 @@ describe('SES Suppression Provider', function () {
         result.should.deepEqual({suppressed: false, info: null});
     });
 
+    it('propagates SES lookup failures instead of treating them as unsuppressed', async function () {
+        const error = new Error('Access denied');
+        error.name = 'AccessDeniedException';
+        sesClient.send.rejects(error);
+
+        await createProvider().getSuppressionData('member@example.com').should.be.rejectedWith(error);
+    });
+
     it('returns results in input order for bulk lookups', async function () {
         sesClient.send.onFirstCall().resolves({SuppressedDestination: {Reason: 'BOUNCE'}});
         sesClient.send.onSecondCall().rejects({name: 'NotFoundException'});

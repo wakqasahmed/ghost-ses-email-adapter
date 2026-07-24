@@ -215,7 +215,17 @@ The adapter sends Ghost newsletter bulk email through SES. Its interim Ghost pat
 
 Issue [#6](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/6) added an SES analytics provider for opens, bounces, and complaints via SES → SNS → SQS. Ghost does not yet have the separate analytics-adapter wiring required to load it, so analytics is not currently a usable Ghost feature. The [analytics setup notes](https://github.com/wakqasahmed/ghost-ses-email-adapter/blob/main/docs/analytics-setup.md) describe the required infrastructure for when that wiring exists.
 
-SES account-level suppression-list support is not implemented; it is tracked in [#8](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/8).
+Issue [#8](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/8) adds a standalone `SESSuppressionProvider`. It uses SESv2's account-level suppression list and follows Ghost's proposed suppression-adapter contract:
+
+```js
+const {SESSuppressionProvider} = require('ghost-ses-email-adapter');
+
+const suppressionProvider = new SESSuppressionProvider({
+    region: 'us-east-1'
+});
+```
+
+It supports `getSuppressionData(email)`, `getBulkSuppressionData(emails)`, and `removeEmail(email)`. A `BOUNCE` maps to Ghost's `fail` reason and a `COMPLAINT` to `spam`. SES must have account-level suppression enabled and the runtime IAM identity needs `ses:GetSuppressedDestination` and `ses:DeleteSuppressedDestination`. Ghost still needs its separate suppression-adapter wiring before it can instantiate this provider automatically.
 
 ## Credits
 

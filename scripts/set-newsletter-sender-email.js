@@ -5,12 +5,14 @@
  * Sets a newsletter's sender_email directly in Ghost's database, replacing an
  * ad hoc SQL UPDATE with a reviewed, dry-run-by-default operational script.
  *
- * Run this from Ghost's own installation directory (the one containing
- * `current/`), so it reuses Ghost's own installed `knex` and database driver
- * plus Ghost's own config file. It never installs a driver of its own.
+ * Run this from Ghost's installation root (the directory containing both
+ * `config.<env>.json` and `current/`) — a standard Ghost install splits the
+ * config file (install root) from `node_modules` (inside `current/`), so this
+ * script reuses Ghost's own installed `knex` and database driver from either
+ * location rather than installing a driver of its own.
  *
  * Usage:
- *   node set-newsletter-sender-email.js --newsletter <slug-or-id> --sender-email <email> [--yes] [--config path/to/config.json]
+ *   node set-newsletter-sender-email.js --newsletter <slug-or-id> --sender-email <email> [--yes] [--config path/to/config.json] [--ghost-dir path]
  *
  * Without --yes, this only prints what would change.
  */
@@ -32,13 +34,15 @@ function parseArgs(argv) {
             args.senderEmail = argv[++i];
         } else if (arg === '--config') {
             args.configPath = argv[++i];
+        } else if (arg === '--ghost-dir') {
+            args.ghostDir = argv[++i];
         } else {
             throw new Error(`Unrecognized argument: ${arg}`);
         }
     }
 
     if (!args.newsletter || !args.senderEmail) {
-        throw new Error('Usage: node set-newsletter-sender-email.js --newsletter <slug-or-id> --sender-email <email> [--yes] [--config path]');
+        throw new Error('Usage: node set-newsletter-sender-email.js --newsletter <slug-or-id> --sender-email <email> [--yes] [--config path] [--ghost-dir path]');
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(args.senderEmail)) {
@@ -48,10 +52,10 @@ function parseArgs(argv) {
     return args;
 }
 
-function loadGhostConfig(configPath) {
+function loadGhostConfig(ghostDir, configPath) {
     const resolvedPath = configPath
         ? path.resolve(configPath)
-        : path.resolve(process.cwd(), `config.${process.env.NODE_ENV || 'production'}.json`);
+        : path.resolve(ghostDir, `config.${process.env.NODE_ENV || 'production'}.json`);
 
     if (!fs.existsSync(resolvedPath)) {
         throw new Error(`Ghost config file not found at ${resolvedPath}. Run this from the Ghost installation root, or pass --config.`);
@@ -66,13 +70,25 @@ function loadGhostConfig(configPath) {
     return config;
 }
 
-function loadGhostKnex() {
-    // Reuse the knex Ghost itself installed under current/node_modules, so this
-    // script never adds its own database dependency to the adapter package.
-    const knexPath = path.resolve(process.cwd(), 'node_modules', 'knex');
+function findGhostKnexPath(ghostDir) {
+    // A Ghost install root keeps node_modules inside current/; running the
+    // script from current/ itself (or a non-standard single-directory layout)
+    // means node_modules is a direct child instead. Try both before giving up.
+    const candidates = [
+        path.resolve(ghostDir, 'node_modules', 'knex'),
+        path.resolve(ghostDir, 'current', 'node_modules', 'knex')
+    ];
 
-    if (!fs.existsSync(knexPath)) {
-        throw new Error('node_modules/knex not found. Run this from the Ghost installation root (the directory containing node_modules, alongside current/ or as current/ itself).');
+    return candidates.find(candidate => fs.existsSync(candidate));
+}
+
+function loadGhostKnex(ghostDir) {
+    // Reuse the knex Ghost itself already has installed, so this script never
+    // adds its own database dependency to the adapter package.
+    const knexPath = findGhostKnexPath(ghostDir);
+
+    if (!knexPath) {
+        throw new Error(`knex not found under ${ghostDir}/node_modules or ${ghostDir}/current/node_modules. Run this from the Ghost installation root (the directory containing config.*.json and current/), or pass --ghost-dir.`);
     }
 
     return require(knexPath);
@@ -80,8 +96,9 @@ function loadGhostKnex() {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const config = loadGhostConfig(args.configPath);
-    const knexFactory = loadGhostKnex();
+    const ghostDir = path.resolve(args.ghostDir || process.cwd());
+    const config = loadGhostConfig(ghostDir, args.configPath);
+    const knexFactory = loadGhostKnex(ghostDir);
     const db = knexFactory({
         client: config.database.client,
         connection: config.database.connection,
@@ -122,7 +139,11 @@ async function main() {
     }
 }
 
-main().catch((err) => {
-    console.error(`Error: ${err.message}`);
-    process.exitCode = 1;
-});
+module.exports = {parseArgs, loadGhostConfig, findGhostKnexPath};
+
+if (require.main === module) {
+    main().catch((err) => {
+        console.error(`Error: ${err.message}`);
+        process.exitCode = 1;
+    });
+}

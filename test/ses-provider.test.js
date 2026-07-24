@@ -830,18 +830,57 @@ describe('SES Email Provider Adapter', function () {
             await adapter.send(emailData).should.be.rejectedWith(/Lambda denied \[redacted\]/);
         });
 
-        it('should surface FunctionError payloads as redacted EmailErrors', async function () {
+        it('should surface FunctionError payloads as redacted EmailErrors, restoring code and status from the handler suffix', async function () {
             const adapter = new SESEmailProvider({ses: lambdaConfig});
+            // Runtime-faithful payload: only errorType/errorMessage survive Lambda error serialization
             lambdaClient.send.resolves({
                 FunctionError: 'Unhandled',
+                $metadata: {httpStatusCode: 200},
                 Payload: Buffer.from(JSON.stringify({
                     errorType: 'MessageRejected',
-                    errorMessage: 'SES rejected user@example.com',
-                    statusCode: 400
+                    errorMessage: 'SES rejected user@example.com [ses code=MessageRejected status=400]'
                 }))
             });
 
-            await adapter.send(emailData).should.be.rejectedWith(/SES rejected \[redacted\]/);
+            try {
+                await adapter.send(emailData);
+                throw new Error('expected send to reject');
+            } catch (err) {
+                err.name.should.equal('EmailError');
+                err.statusCode.should.equal(400);
+                err.message.should.match(/SES rejected \[redacted\]/);
+                err.message.should.not.containEql('[ses code=');
+            }
+        });
+
+        it('should never report the invoke HTTP 200 as the failure status when the suffix is absent', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            lambdaClient.send.resolves({
+                FunctionError: 'Unhandled',
+                $metadata: {httpStatusCode: 200},
+                Payload: Buffer.from(JSON.stringify({
+                    errorType: 'Error',
+                    errorMessage: 'boom'
+                }))
+            });
+
+            try {
+                await adapter.send(emailData);
+                throw new Error('expected send to reject');
+            } catch (err) {
+                err.name.should.equal('EmailError');
+                err.statusCode.should.equal(500);
+            }
+        });
+
+        it('should treat a success response without messageId as a failure', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            lambdaClient.send.resolves({
+                $metadata: {httpStatusCode: 200},
+                Payload: Buffer.from(JSON.stringify({ok: true}))
+            });
+
+            await adapter.send(emailData).should.be.rejectedWith(/returned no messageId/);
         });
 
         it('should fail before invoking Lambda when the request payload exceeds 6 MB', async function () {

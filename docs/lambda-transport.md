@@ -10,7 +10,7 @@ Copy [`examples/lambda-ses-sender/index.js`](../examples/lambda-ses-sender/index
 npm install @aws-sdk/client-ses
 ```
 
-Set the Lambda handler to `index.handler` and deploy it in the SES region. The handler returns SES's `MessageId`; when SES rejects a send, it rethrows the error so the adapter receives the error details.
+Set the Lambda handler to `index.handler` and deploy it in the SES region. The handler returns SES's `MessageId`; when SES rejects a send, it rethrows the error with a `[ses code=... status=...]` suffix on the message. That suffix matters: the Lambda runtime serializes only an error's type and message, and the adapter parses the suffix to restore the SES error code and HTTP status (without it, failures are reported with status 500). A custom handler must preserve this contract — and must return `{messageId}` on success, or the adapter treats the send as failed.
 
 ## Grant the two IAM permissions
 

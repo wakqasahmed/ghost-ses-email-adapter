@@ -43,10 +43,29 @@ class LambdaSESSender {
         const result = responsePayload ? JSON.parse(responsePayload) : {};
 
         if (response.FunctionError) {
-            const error = new Error(result.errorMessage || result.message || 'Lambda SES sender failed');
+            // The Lambda runtime serializes thrown errors as {errorType, errorMessage, trace} and drops
+            // custom properties; the reference handler appends "[ses code=... status=...]" to preserve them.
+            let message = result.errorMessage || result.message || 'Lambda SES sender failed';
+            let code;
+            let statusCode;
+            const detailMatch = message.match(/ \[ses code=([^\s\]]+) status=(\d*)\]$/);
+
+            if (detailMatch) {
+                message = message.slice(0, detailMatch.index);
+                code = detailMatch[1];
+                statusCode = Number(detailMatch[2]) || undefined;
+            }
+
+            const error = new Error(message);
             error.name = result.errorType || response.FunctionError;
-            error.code = result.code;
-            error.$metadata = {httpStatusCode: result.statusCode || response.$metadata?.httpStatusCode};
+            error.code = code || result.code;
+            error.$metadata = {httpStatusCode: statusCode || result.statusCode || 500};
+            throw error;
+        }
+
+        if (!result.messageId) {
+            const error = new Error(`Lambda function ${this.#functionName} returned no messageId - it must return the reference SES sender response`);
+            error.$metadata = {httpStatusCode: 502};
             throw error;
         }
 

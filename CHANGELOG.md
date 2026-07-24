@@ -1,5 +1,18 @@
 # ghost-ses-email-adapter
 
+## 0.2.0
+
+### Minor Changes
+
+- 209606a: Add an SESv2 account-level suppression-list provider.
+- 0adb1a6: Add a Lambda send transport for IAM-restricted and cross-account SES setups.
+
+### Patch Changes
+
+- 72958c9: Updated the recommended npm installation guidance, documented Docker-compatible
+  local development, and required the complete email provider contract used by
+  Ghost newsletter sending.
+
 ## 0.1.0
 
 ### Minor Changes

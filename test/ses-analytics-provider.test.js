@@ -136,7 +136,7 @@ describe('SES Analytics Provider', function () {
             error: {
                 code: '5.1.1',
                 message: 'smtp; 550 user unknown',
-                enhandedCode: '5.1.1'
+                enhancedCode: '5.1.1'
             },
             emailId: 'ghost-email-2',
             providerId: 'ses-message-2',

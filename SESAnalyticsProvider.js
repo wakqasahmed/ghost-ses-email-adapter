@@ -120,7 +120,7 @@ class SESAnalyticsProvider {
                 error: {
                     code: recipient.status || event.bounce?.bounceType || 'Bounce',
                     message: recipient.diagnosticCode || `SES ${event.bounce?.bounceType || 'Unknown'} bounce`,
-                    enhandedCode: recipient.status || null
+                    enhancedCode: recipient.status || null
                 },
                 emailId,
                 providerId

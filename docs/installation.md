@@ -142,4 +142,4 @@ EMAIL_PROVIDER=SESEmailProvider
 
 ## Upstream status
 
-This patch is temporary. It becomes unnecessary after the upstream Ghost adapter wiring work tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) is merged and released. It was last verified against the embedded Ghost v6.53.0 runtime; re-run the integration check before every Ghost upgrade.
+This patch is temporary. It becomes unnecessary after [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553) — the upstream adapter-wiring PR tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) — is merged and released; once it ships, installing this adapter needs no patching and no other changes to Ghost core. The PR is open and awaiting maintainer review — comments or reactions there help it get considered. It was last verified against the embedded Ghost v6.53.0 runtime; re-run the integration check before every Ghost upgrade.

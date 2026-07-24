@@ -10,11 +10,13 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 > "I think having an adapter mechanism would be enough for Ghost core. And self-hosters can use a 3rd party adapter to add SES or other providers to their Ghost sites." — Ghost core team, on #25367
 
-This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch enables the adapter on self-hosted installs.
+This package is that community-maintained SES provider. Whether you send directly or through a locked-down Lambda for IAM/compliance reasons, it's the most complete SES integration available for Ghost today — bulk sending with retries and idempotency, SESv2 suppression-list support, and an analytics provider for opens/bounces/complaints, ahead of what any other third-party option offers.
+
+A companion minimal PR to Ghost core, [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553), proposes the small wiring change needed for stock Ghost to load third-party email adapters — no bundled SES code, just the adapter-manager hook Ghost core itself asked for. **It's open and awaiting maintainer review; a comment or reaction there directly helps it get traction.** Until it merges, an interim patch (below) enables the adapter on self-hosted installs.
 
 ## How
 
-1. Apply the interim wiring patch for your Ghost version (stock Ghost doesn't yet resolve third-party email adapters).
+1. Apply the interim wiring patch for your Ghost version (stock Ghost doesn't yet resolve third-party email adapters). This step disappears once [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553) merges — installing the adapter will then need no patching and no other changes to Ghost core.
 2. Install the adapter:
 
    ```bash
@@ -27,7 +29,7 @@ This package is that community-maintained SES provider. A companion minimal PR t
 
 Full walkthrough, config reference, Docker setup, and the disposable integration checks: **[Installation guide](docs/installation.md)**.
 
-Need SES access walled off behind IAM (a shared platform account, cross-account send)? See **[Lambda transport](docs/lambda-transport.md)** — Ghost keeps only `lambda:InvokeFunction`, never `ses:SendRawEmail`.
+Need SES access walled off behind IAM — a shared platform account, cross-account send, stricter compliance posture? See **[Lambda transport](docs/lambda-transport.md)**: Ghost keeps only `lambda:InvokeFunction`, so `ses:SendRawEmail`, verified identities, DKIM, and sending reputation never have to leave the platform account.
 
 ## Supported Ghost versions
 
@@ -46,6 +48,7 @@ Both versions need their matching patch until Ghost core ships third-party email
 - [Analytics setup](docs/analytics-setup.md) — SES → SNS → SQS opens/bounces/complaints provider (not yet wired by Ghost)
 - [Suppression provider](docs/suppression-provider.md) — SESv2 account-level suppression list
 - [Sender-email verification workaround](docs/sender-email-verification.md) — newsletter `sender_email` stuck as unverified in the Admin UI
+- [Changelog](CHANGELOG.md) — release history
 
 ## Credits
 

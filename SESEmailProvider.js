@@ -184,13 +184,24 @@ class SESEmailProvider extends EmailProviderBase {
         return redactedValue.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted]');
     }
 
+    // Ghost sends one newsletter as multiple concurrent batches that all share the
+    // same emailId (batch-sending-service.js runs up to 2 workers at once). Keying
+    // retry/in-flight state on emailId alone made two different batches of the same
+    // email collide - one batch's promise was silently returned to the other caller,
+    // and its recipients were never sent. Folding a recipient-set digest into the key
+    // keeps genuine retries of the same batch coalescing correctly while giving every
+    // distinct batch its own key.
     #getRetryKey({emailId, idempotencyKey, subject, html, plaintext, from, replyTo, recipients, replacementDefinitions, options}) {
+        const recipientDigest = crypto.createHash('sha256')
+            .update(recipients.map(recipient => recipient.email).sort().join(','))
+            .digest('hex');
+
         if (emailId) {
-            return `email:${emailId}`;
+            return `email:${emailId}:${recipientDigest}`;
         }
 
         if (idempotencyKey) {
-            return `idempotency:${idempotencyKey}`;
+            return `idempotency:${idempotencyKey}:${recipientDigest}`;
         }
 
         const payload = JSON.stringify({

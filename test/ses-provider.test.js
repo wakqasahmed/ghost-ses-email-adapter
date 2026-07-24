@@ -308,6 +308,27 @@ describe('SES Email Provider Adapter', function () {
             command.Source.should.equal('default@example.com');
         });
 
+        it('sends both batches when two concurrent sends share the same emailId but have different recipients', async function () {
+            sesClient.send.onFirstCall().resolves({MessageId: 'batch-a-id'});
+            sesClient.send.onSecondCall().resolves({MessageId: 'batch-b-id'});
+
+            const batchA = {...emailData, recipients: [{email: 'a1@example.com'}, {email: 'a2@example.com'}]};
+            const batchB = {...emailData, recipients: [{email: 'b1@example.com'}, {email: 'b2@example.com'}]};
+
+            const [resultA, resultB] = await Promise.all([
+                adapter.send(batchA, sendOptions),
+                adapter.send(batchB, sendOptions)
+            ]);
+
+            sesClient.send.callCount.should.equal(2);
+            resultA.id.should.not.equal(resultB.id);
+
+            const destinations = SendRawEmailCommand.getCalls()
+                .map(call => call.args[0].Destinations)
+                .flat();
+            destinations.should.containDeep(['a1@example.com', 'a2@example.com', 'b1@example.com', 'b2@example.com']);
+        });
+
         it('should send one recipient per SES request', async function () {
             emailData.recipients = [
                 {email: 'user1@example.com', replacements: [{id: 'name', value: 'Alice'}]},

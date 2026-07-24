@@ -2,6 +2,8 @@ const EmailProviderBase = require('./EmailProviderBase');
 const errors = require('@tryghost/errors');
 const debug = require('@tryghost/debug')('email-service:ses-adapter');
 const crypto = require('node:crypto');
+const DirectSESSender = require('./DirectSESSender');
+const LambdaSESSender = require('./LambdaSESSender');
 
 // Keep retry recipient state short-lived in practice and bounded to 1,000 keys to limit memory and PII retention.
 const MAX_RETRY_STATE_ENTRIES = 1000;
@@ -14,7 +16,7 @@ const MAX_BCC_HEADER_LINE_LENGTH = 900;
  * Extends EmailProviderBase to work with Ghost's AdapterManager.
  */
 class SESEmailProvider extends EmailProviderBase {
-    #sesClient;
+    #sender;
     #config;
     #sesConfig;
     #errorHandler;
@@ -52,27 +54,28 @@ class SESEmailProvider extends EmailProviderBase {
             });
         }
 
-        const {SESClient} = require('@aws-sdk/client-ses');
-
         // Store full config to preserve root-level fields
         this.#config = config;
         this.#sesConfig = sesConfig;
         this.#errorHandler = config.errorHandler;
 
-        // Create SES client
-        const clientConfig = {
-            region: sesConfig.region
-        };
-
-        // Add credentials if provided (otherwise uses IAM role)
-        if (sesConfig.accessKeyId && sesConfig.secretAccessKey) {
-            clientConfig.credentials = {
-                accessKeyId: sesConfig.accessKeyId,
-                secretAccessKey: sesConfig.secretAccessKey
-            };
+        if (sesConfig.transport !== undefined && sesConfig.transport !== 'direct' && sesConfig.transport !== 'lambda') {
+            throw new errors.IncorrectUsageError({
+                message: `SES adapter transport must be 'direct' or 'lambda', got '${sesConfig.transport}'`
+            });
         }
 
-        this.#sesClient = new SESClient(clientConfig);
+        if (sesConfig.transport === 'lambda') {
+            if (!sesConfig.lambda?.functionName) {
+                throw new errors.IncorrectUsageError({
+                    message: 'SES Lambda transport requires functionName in configuration'
+                });
+            }
+
+            this.#sender = new LambdaSESSender(sesConfig);
+        } else {
+            this.#sender = new DirectSESSender(sesConfig);
+        }
     }
 
     /**
@@ -473,7 +476,6 @@ class SESEmailProvider extends EmailProviderBase {
      * @private
      */
     async #sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options}) {
-        const {SendRawEmailCommand} = require('@aws-sdk/client-ses');
         const BATCH_SIZE = 50;
         const successfulRecipients = this.#successfulRecipients.get(retryKey) || new Set();
         const pendingRecipients = recipients.filter(recipient => !successfulRecipients.has(recipient.email));
@@ -531,23 +533,17 @@ class SESEmailProvider extends EmailProviderBase {
 
             const rawMessage = mime.join('\r\n');
 
-            const command = new SendRawEmailCommand({
-                Source: source,
-                Destinations: batch.map(r => r.email),
-                RawMessage: {
-                    Data: Buffer.from(rawMessage)
-                },
-                ConfigurationSetName: this.#getConfigurationSetName(options),
-                Tags: [
-                    {
-                        Name: 'email-id',
-                        Value: emailId || 'unknown'
-                    }
-                ]
+            const response = await this.#sender.sendRawEmail({
+                source,
+                destinations: batch.map(r => r.email),
+                rawMessage: Buffer.from(rawMessage),
+                configurationSetName: this.#getConfigurationSetName(options),
+                tags: [{
+                    Name: 'email-id',
+                    Value: emailId || 'unknown'
+                }]
             });
-
-            const response = await this.#sesClient.send(command);
-            results.push(response.MessageId);
+            results.push(response.messageId);
             batch.forEach(recipient => successfulRecipients.add(recipient.email));
             this.#rememberSuccessfulRecipients(retryKey, successfulRecipients);
         }
@@ -633,7 +629,6 @@ class SESEmailProvider extends EmailProviderBase {
                 return await this.#sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options});
             }
 
-            const {SendRawEmailCommand} = require('@aws-sdk/client-ses');
             const configurationSetName = this.#getConfigurationSetName(options);
             const encodedFrom = this.#encodeAddressHeader(from || this.#sesConfig.fromEmail, undefined, false);
             const successfulRecipients = this.#successfulRecipients.get(retryKey) || new Set();
@@ -654,20 +649,17 @@ class SESEmailProvider extends EmailProviderBase {
                         replyTo,
                         listUnsubscribe: this.#getListUnsubscribeUrl(recipient.replacements)
                     });
-                    const command = new SendRawEmailCommand({
-                        Source: encodedFrom,
-                        Destinations: [recipient.email],
-                        RawMessage: {
-                            Data: Buffer.from(rawMessage)
-                        },
-                        ConfigurationSetName: configurationSetName,
-                        Tags: [{
+                    const response = await this.#sender.sendRawEmail({
+                        source: encodedFrom,
+                        destinations: [recipient.email],
+                        rawMessage: Buffer.from(rawMessage),
+                        configurationSetName,
+                        tags: [{
                             Name: 'email-id',
                             Value: emailId || 'unknown'
                         }]
                     });
-                    const response = await this.#sesClient.send(command);
-                    return {messageId: response.MessageId, recipient: recipient.email};
+                    return {messageId: response.messageId, recipient: recipient.email};
                 }));
 
                 for (const result of sendResults) {

@@ -12,6 +12,25 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 This package is that community-maintained SES provider. A companion minimal PR to Ghost core (tracked in this repo's issues) proposes the small wiring change needed for stock Ghost to load third-party email adapters; until it lands, an interim patch enables the adapter on self-hosted installs.
 
+## Locked-down AWS? Send through a Lambda
+
+Keep verified identities, DKIM, sending reputation, and `ses:SendRawEmail` in a shared platform account while Ghost keeps only `lambda:InvokeFunction` on one designated function. Set `ses.transport` to `lambda`; the adapter invokes the function synchronously and still receives the SES MessageId needed for Ghost retries and analytics.
+
+```json
+{
+  "ses": {
+    "region": "eu-west-1",
+    "fromEmail": "news@example.com",
+    "transport": "lambda",
+    "lambda": {
+      "functionName": "arn:aws:lambda:eu-west-1:123456789012:function:ghost-ses-sender"
+    }
+  }
+}
+```
+
+See the [reference handler](examples/lambda-ses-sender/index.js), [two IAM policies, deployment, and verification walkthrough](docs/lambda-transport.md). Direct SES remains the default.
+
 ## Supported Ghost versions
 
 | Ghost version | Status | Verified runtime | Interim wiring patch | Disposable check |
@@ -129,6 +148,7 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
          "ses": {
            "region": "eu-west-1",
            "fromEmail": "news@example.com",
+           "transport": "direct",
            "configurationSets": {
              "openAndClick": "ghost-track-open-and-click",
              "openOnly": "ghost-track-open-only",
@@ -144,6 +164,8 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
    ```
 
    `accessKeyId` and `secretAccessKey` are optional credentials. Prefer the AWS SDK default credential provider chain: omit both keys and supply an IAM role, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` environment variables, or another supported AWS credential source. Never commit real credentials to Ghost configuration.
+
+   `transport` defaults to `direct`. For IAM-restricted or cross-account SES, set it to `lambda` and add `lambda.functionName`; `lambda.region` is optional and falls back to `ses.region`. See the [Lambda transport walkthrough](docs/lambda-transport.md).
 
    Create the four SES configuration sets shown above. Their event destinations must respectively publish open-and-click, open-only, click-only, and no open/click events. The adapter selects the matching set for Ghost's `openTrackingEnabled` and `clickTrackingEnabled` flags. A legacy `configurationSet` remains supported only when both flags are enabled; configure a `disabled` set to make opt-outs explicit.
 

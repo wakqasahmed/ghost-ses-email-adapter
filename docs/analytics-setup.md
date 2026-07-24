@@ -10,6 +10,22 @@ The current interim Ghost 6.x patch in this repository activates the SES **email
 
 Until that exists, SES sending works with the interim email patch, but this poller is not activated by stock Ghost or by issue #5 alone.
 
+## Locked-down and cross-account setups
+
+The Lambda send transport does not proxy analytics: `SESAnalyticsProvider` still polls SQS directly. In a locked-down or cross-account deployment, grant Ghost's runtime role access to the one queue with a queue policy such as this (replace the account, role, and queue ARN):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"AWS": "arn:aws:iam::111122223333:role/ghost-runtime"},
+    "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+    "Resource": "arn:aws:sqs:eu-west-1:123456789012:ghost-ses-events"
+  }]
+}
+```
+
 ## Important accuracy constraint
 
 Ghost identifies an analytics event by both the newsletter `emailId` and the recipient email. SES publishes the `email-id` message tag set by `SESEmailProvider`, so deliveries, bounces, and complaints can be matched. An SES Open record does not itself include a recipient address; the provider accepts it only when `mail.destination` has exactly one recipient. It skips multi-recipient Open records rather than marking every destination as opened.

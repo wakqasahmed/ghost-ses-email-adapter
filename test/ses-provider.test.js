@@ -8,6 +8,10 @@ describe('SES Email Provider Adapter', function () {
     let errorHandler;
     let sandbox;
     let SendRawEmailCommand;
+    let lambdaClient;
+    let LambdaClient;
+    let InvokeCommand;
+    let lambdaRequireCount;
 
     beforeEach(function () {
         sandbox = sinon.createSandbox();
@@ -17,10 +21,20 @@ describe('SES Email Provider Adapter', function () {
             return {input};
         });
 
+        InvokeCommand = sandbox.stub().callsFake(function (input) {
+            return {input};
+        });
+
         // Mock SES client
         sesClient = {
             send: sandbox.stub().resolves({MessageId: 'test-message-id-123'})
         };
+
+        lambdaClient = {
+            send: sandbox.stub().resolves({Payload: Buffer.from(JSON.stringify({messageId: 'lambda-message-id-123'}))})
+        };
+        LambdaClient = sandbox.stub().returns(lambdaClient);
+        lambdaRequireCount = 0;
 
         errorHandler = sandbox.stub();
 
@@ -29,11 +43,19 @@ describe('SES Email Provider Adapter', function () {
             SESClient: sandbox.stub().returns(sesClient),
             SendRawEmailCommand
         };
+        const mockLambdaSdk = {
+            LambdaClient,
+            InvokeCommand
+        };
 
         const originalLoad = module.constructor._load;
         sandbox.stub(module.constructor, '_load').callsFake(function (request, parent) {
             if (request === '@aws-sdk/client-ses') {
                 return mockAwsSdk;
+            }
+            if (request === '@aws-sdk/client-lambda') {
+                lambdaRequireCount += 1;
+                return mockLambdaSdk;
             }
             // Delegate to original for all other modules
             return originalLoad.apply(this, arguments);
@@ -159,6 +181,37 @@ describe('SES Email Provider Adapter', function () {
         it('should resolve its regular AWS SDK dependency', function () {
             require('@aws-sdk/client-ses').should.have.property('SESClient');
         });
+
+        it('should require the Lambda SDK only for Lambda transport', function () {
+            new SESEmailProvider({
+                ses: {
+                    region: 'us-east-1',
+                    fromEmail: 'test@example.com'
+                }
+            });
+
+            lambdaRequireCount.should.equal(0);
+        });
+
+        it('should require a Lambda function name for Lambda transport', function () {
+            (() => new SESEmailProvider({
+                ses: {
+                    region: 'us-east-1',
+                    fromEmail: 'test@example.com',
+                    transport: 'lambda'
+                }
+            })).should.throw(/Lambda transport requires functionName/);
+        });
+
+        it('should reject unknown transport values instead of silently sending direct', function () {
+            (() => new SESEmailProvider({
+                ses: {
+                    region: 'us-east-1',
+                    fromEmail: 'test@example.com',
+                    transport: 'lamda'
+                }
+            })).should.throw(/transport must be 'direct' or 'lambda'/);
+        });
     });
 
     describe('send()', function () {
@@ -200,6 +253,7 @@ describe('SES Email Provider Adapter', function () {
             const result = await adapter.send(emailData, sendOptions);
 
             sesClient.send.calledOnce.should.be.true();
+            lambdaRequireCount.should.equal(0);
             result.should.deepEqual({id: 'test-message-id-123'});
         });
 
@@ -707,6 +761,98 @@ describe('SES Email Provider Adapter', function () {
             const maxRecipients = adapter.getMaximumRecipients();
 
             maxRecipients.should.equal(1);
+        });
+    });
+
+    describe('Lambda transport', function () {
+        const lambdaConfig = {
+            region: 'us-east-1',
+            fromEmail: 'default@example.com',
+            transport: 'lambda',
+            lambda: {
+                functionName: 'ghost-ses-sender',
+                region: 'eu-west-1'
+            }
+        };
+        const emailData = {
+            subject: 'Test Email',
+            html: '<p>Hello World</p>',
+            plaintext: 'Hello World',
+            from: 'test@example.com',
+            emailId: 'test-email-123',
+            recipients: [{email: 'user@example.com'}]
+        };
+
+        it('should invoke Lambda synchronously and return its MessageId', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+
+            const result = await adapter.send(emailData);
+
+            result.should.deepEqual({id: 'lambda-message-id-123'});
+            sesClient.send.called.should.be.false();
+            lambdaRequireCount.should.be.above(0);
+            LambdaClient.calledWith({region: 'eu-west-1'}).should.be.true();
+            InvokeCommand.firstCall.args[0].should.containEql({
+                FunctionName: 'ghost-ses-sender',
+                InvocationType: 'RequestResponse'
+            });
+            const payload = JSON.parse(InvokeCommand.firstCall.args[0].Payload.toString());
+            payload.should.containEql({
+                source: 'test@example.com',
+                destinations: ['user@example.com']
+            });
+            Buffer.from(payload.rawMessage, 'base64').toString().should.match(/Subject: Test Email/);
+        });
+
+        it('should use Lambda for personalized sends', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            const personalizedData = {
+                ...emailData,
+                recipients: [{
+                    email: 'user@example.com',
+                    replacements: [{id: 'name', value: 'Ada'}]
+                }],
+                replacementDefinitions: [{id: 'name', token: '%%{name}%%'}],
+                html: '<p>Hello %%{name}%%</p>'
+            };
+
+            await adapter.send(personalizedData);
+
+            lambdaClient.send.calledOnce.should.be.true();
+            const payload = JSON.parse(InvokeCommand.firstCall.args[0].Payload.toString());
+            Buffer.from(payload.rawMessage, 'base64').toString().should.containEql('Hello=20Ada');
+        });
+
+        it('should surface invoke failures as redacted EmailErrors', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            lambdaClient.send.rejects(new Error('Lambda denied user@example.com'));
+
+            await adapter.send(emailData).should.be.rejectedWith(/Lambda denied \[redacted\]/);
+        });
+
+        it('should surface FunctionError payloads as redacted EmailErrors', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            lambdaClient.send.resolves({
+                FunctionError: 'Unhandled',
+                Payload: Buffer.from(JSON.stringify({
+                    errorType: 'MessageRejected',
+                    errorMessage: 'SES rejected user@example.com',
+                    statusCode: 400
+                }))
+            });
+
+            await adapter.send(emailData).should.be.rejectedWith(/SES rejected \[redacted\]/);
+        });
+
+        it('should fail before invoking Lambda when the request payload exceeds 6 MB', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            const oversizedData = {
+                ...emailData,
+                html: 'x'.repeat(6 * 1024 * 1024)
+            };
+
+            await adapter.send(oversizedData).should.be.rejectedWith(/6 MB/);
+            lambdaClient.send.called.should.be.false();
         });
     });
 

@@ -1,5 +1,13 @@
 # ghost-ses-email-adapter
 
+## 0.2.1
+
+### Patch Changes
+
+- 95cc2ed: Link the changelog from the README, note that the upstream wiring PR (TryGhost/Ghost#29553) eliminates patching entirely once merged, invite readers to support it, and sharpen the README's pitch for direct and Lambda-mediated SES sending.
+- 0db95d4: Document Ghost's actual newsletter sender_email verification mechanism (not Mailgun-specific) and add a safe, dry-run-by-default script for setting it directly, replacing ad hoc SQL.
+- ee646e9: Split the README into focused topic docs (installation, local development, suppression provider, sender-email verification); README now covers only what/why/how/supported versions plus a documentation index.
+
 ## 0.2.0
 
 ### Minor Changes

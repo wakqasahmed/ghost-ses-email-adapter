@@ -7,7 +7,6 @@ const LambdaSESSender = require('./LambdaSESSender');
 
 // Keep retry recipient state short-lived in practice and bounded to 1,000 keys to limit memory and PII retention.
 const MAX_RETRY_STATE_ENTRIES = 1000;
-const MAX_BCC_HEADER_LINE_LENGTH = 900;
 
 /**
  * Amazon SES Email Provider Adapter
@@ -225,27 +224,6 @@ class SESEmailProvider extends EmailProviderBase {
         if (this.#successfulRecipients.size > MAX_RETRY_STATE_ENTRIES) {
             this.#successfulRecipients.delete(this.#successfulRecipients.keys().next().value);
         }
-    }
-
-    #formatBccHeader(recipients) {
-        const addresses = recipients.map(recipient => this.#sanitizeHeader(recipient.email));
-        const lines = [];
-        let line = 'Bcc:';
-
-        for (const [index, address] of addresses.entries()) {
-            const value = index === addresses.length - 1 ? address : `${address},`;
-            const candidate = `${line} ${value}`;
-
-            if (line !== 'Bcc:' && Buffer.byteLength(candidate) > MAX_BCC_HEADER_LINE_LENGTH) {
-                lines.push(line);
-                line = ` ${value}`;
-            } else {
-                line = candidate;
-            }
-        }
-
-        lines.push(line);
-        return lines.join('\r\n');
     }
 
     /**
@@ -483,7 +461,14 @@ class SESEmailProvider extends EmailProviderBase {
 
     /**
      * Send bulk email without personalization (efficient for large newsletters)
-     * Sends ONE email with up to 50 recipients in BCC per batch
+     * Sends ONE email with up to 50 recipients per batch, routed via the
+     * SendRawEmailCommand `Destinations` field (no Bcc header is written -
+     * SES documents no guarantee that a Bcc header is stripped before
+     * delivery, and Destinations alone is sufficient for routing).
+     * Note: Ghost's sending-service always attaches per-recipient
+     * replacements (e.g. the unsubscribe token), so #hasPersonalization is
+     * effectively always true in real Ghost sends and this path is not
+     * currently reachable from Ghost - see issue #57.
      * @private
      */
     async #sendBulk({subject, html, plaintext, from, replyTo, emailId, recipients, retryKey, startTime, options}) {
@@ -496,7 +481,6 @@ class SESEmailProvider extends EmailProviderBase {
         debug(`sending bulk email to ${recipients.length} recipients in ${batches.length} batches`);
 
         for (const batch of batches) {
-            const bccHeader = this.#formatBccHeader(batch);
             const sanitizedFrom = this.#sanitizeHeader(from || this.#sesConfig.fromEmail);
             const encodedFrom = this.#encodeAddressHeader(sanitizedFrom, 'From');
             const source = this.#encodeAddressHeader(sanitizedFrom, undefined, false);
@@ -513,7 +497,6 @@ class SESEmailProvider extends EmailProviderBase {
             let mime = [
                 `From: ${encodedFrom}`,
                 `To: undisclosed-recipients:;`,
-                bccHeader,
                 `Subject: ${encodedSubject}`,
                 `Date: ${new Date().toUTCString()}`,
                 `Message-ID: ${messageId}`

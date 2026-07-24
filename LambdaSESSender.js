@@ -30,7 +30,10 @@ class LambdaSESSender {
         }));
 
         if (payload.length > MAX_REQUEST_PAYLOAD_BYTES) {
-            throw new Error('Lambda RequestResponse payload exceeds the 6 MB limit');
+            const error = new Error('Lambda RequestResponse payload exceeds the 6 MB limit');
+            // Deterministic condition - report a 4xx so Ghost does not retry it forever
+            error.$metadata = {httpStatusCode: 413};
+            throw error;
         }
 
         const response = await this.#lambdaClient.send(new InvokeCommand({
@@ -63,7 +66,7 @@ class LambdaSESSender {
             throw error;
         }
 
-        if (!result.messageId) {
+        if (!result || !result.messageId) {
             const error = new Error(`Lambda function ${this.#functionName} returned no messageId - it must return the reference SES sender response`);
             error.$metadata = {httpStatusCode: 502};
             throw error;

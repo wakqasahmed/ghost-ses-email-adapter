@@ -883,6 +883,33 @@ describe('SES Email Provider Adapter', function () {
             await adapter.send(emailData).should.be.rejectedWith(/returned no messageId/);
         });
 
+        it('should treat a null success payload as a failure, not a TypeError', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            // A handler returning undefined serializes as the JSON string "null"
+            lambdaClient.send.resolves({
+                $metadata: {httpStatusCode: 200},
+                Payload: Buffer.from('null')
+            });
+
+            await adapter.send(emailData).should.be.rejectedWith(/returned no messageId/);
+        });
+
+        it('should report the 6 MB payload guard as a non-retryable 413', async function () {
+            const adapter = new SESEmailProvider({ses: lambdaConfig});
+            const oversizedData = {
+                ...emailData,
+                html: 'x'.repeat(6 * 1024 * 1024)
+            };
+
+            try {
+                await adapter.send(oversizedData);
+                throw new Error('expected send to reject');
+            } catch (err) {
+                err.name.should.equal('EmailError');
+                err.statusCode.should.equal(413);
+            }
+        });
+
         it('should fail before invoking Lambda when the request payload exceeds 6 MB', async function () {
             const adapter = new SESEmailProvider({ses: lambdaConfig});
             const oversizedData = {

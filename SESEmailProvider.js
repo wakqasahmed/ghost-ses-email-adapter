@@ -30,7 +30,11 @@ class SESEmailProvider extends EmailProviderBase {
      * @param {string} [config.ses.secretAccessKey] - AWS secret access key
      * @param {string} config.ses.fromEmail - Verified sender email address
      * @param {string} [config.ses.configurationSet] - SES configuration set name
-     * @param {Function} [config.errorHandler] - Error handler for logging exceptions
+     * @param {Function} [config.errorHandler] - Error handler for logging exceptions.
+     *   Only invoked if the code instantiating this class passes it explicitly - the
+     *   interim wiring patch's AdapterManager-based instantiation builds config purely
+     *   from JSON and has no way to inject a function, so errorHandler currently has
+     *   no effect on installs using that patch. See docs/installation.md.
      */
     constructor(config) {
         super(config);

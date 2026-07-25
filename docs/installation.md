@@ -84,6 +84,8 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
 
    Ghost retries a failed provider `send()` call for the entire provider batch, so this adapter advertises one recipient per batch. The adapter coalesces concurrent identical sends and retains successful recipients and bulk batches during an in-process retry. It identifies retries by Ghost's `emailId`, a caller-provided `idempotencyKey`, or an identical send payload. Retry state is capped at 1,000 keys (oldest first) to bound memory and in-process recipient-data retention. This protection is not durable across process restarts; callers needing durable idempotency must provide it outside the adapter.
 
+   The constructor also accepts an optional `errorHandler` callback for forwarding send failures to an external error tracker (e.g. Sentry). This has **no effect** when installed via the patch and `config.production.json` above — the interim wiring patch instantiates the adapter purely from JSON config through `AdapterManager`, which has no mechanism to inject a JavaScript function. `errorHandler` is only usable if you instantiate `SESEmailProvider` directly in your own code instead of relying on the patch's AdapterManager wiring.
+
 4. Restart Ghost after applying the patch, installing the adapter, and updating configuration.
 
 ### Docker

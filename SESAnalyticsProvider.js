@@ -45,8 +45,17 @@ class SESAnalyticsProvider {
     async fetchLatest(batchHandler, options = {}) {
         const {DeleteMessageCommand, ReceiveMessageCommand} = require('@aws-sdk/client-sqs');
         const maxEvents = options.maxEvents ?? Infinity;
+        const requestedEvents = options.events || [];
+        const shouldFetch = type => requestedEvents.length === 0 || requestedEvents.includes(type);
+        const begin = options.begin ? new Date(options.begin) : null;
+        const end = options.end ? new Date(options.end) : null;
         let eventCount = 0;
 
+        // Ghost polls this queue twice per analytics cycle with different event-type
+        // filters (opened vs delivered/failed/unsubscribed/complained). A message not
+        // wanted by this call is left undeleted so it reappears after its visibility
+        // timeout for the matching pass, instead of being consumed by whichever call
+        // happens to receive it first.
         while (eventCount < maxEvents) {
             const response = await this.#sqsClient.send(new ReceiveMessageCommand({
                 QueueUrl: this.#config.queueUrl,
@@ -61,19 +70,32 @@ class SESAnalyticsProvider {
             }
 
             for (const message of messages) {
-                const events = this.#parseMessage(message);
+                const parsedEvents = this.#parseMessage(message);
+                const consumedEvents = parsedEvents.filter(event =>
+                    shouldFetch(event.type) && this.#isWithinWindow(event.timestamp, begin, end));
 
-                if (events.length > 0) {
-                    await batchHandler(events);
-                    eventCount += events.length;
+                if (consumedEvents.length > 0) {
+                    await batchHandler(consumedEvents);
+                    eventCount += consumedEvents.length;
                 }
 
-                await this.#sqsClient.send(new DeleteMessageCommand({
-                    QueueUrl: this.#config.queueUrl,
-                    ReceiptHandle: message.ReceiptHandle
-                }));
+                const fullyConsumed = parsedEvents.length === 0 ||
+                    parsedEvents.every(event => consumedEvents.includes(event));
+
+                if (fullyConsumed) {
+                    await this.#sqsClient.send(new DeleteMessageCommand({
+                        QueueUrl: this.#config.queueUrl,
+                        ReceiptHandle: message.ReceiptHandle
+                    }));
+                } else {
+                    debug(`Leaving SQS message ${message.MessageId || 'unknown'} for a different event-type or time-window poll`);
+                }
             }
         }
+    }
+
+    #isWithinWindow(timestamp, begin, end) {
+        return (!begin || timestamp >= begin) && (!end || timestamp <= end);
     }
 
     #parseMessage(message) {

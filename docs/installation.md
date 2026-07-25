@@ -22,7 +22,7 @@ not the recommended production installation method.
 
 ## Install on Ghost 6.x
 
-This interim setup uses the bundled wiring patch because stock Ghost does not yet resolve email adapters. The patch was last verified against the **v6.53.0** runtime embedded in `ghost:6-alpine`; re-run the disposable integration check before applying it to an updated Ghost runtime.
+This interim setup uses the bundled wiring patch because stock Ghost does not yet resolve email adapters. The patch was last verified against the **v6.54.0** runtime embedded in `ghost:6-alpine`; re-run the disposable integration check before applying it to an updated Ghost runtime.
 
 1. Apply [`patches/ghost-6.x-email-adapter-wiring.patch`](../patches/ghost-6.x-email-adapter-wiring.patch) from the running Ghost runtime directory (`/var/lib/ghost/current` in the official image):
 
@@ -91,7 +91,7 @@ This interim setup uses the bundled wiring patch because stock Ghost does not ye
 Build a derived image so the patch and adapter are present on every container start. The following Dockerfile assumes this repository is the build context:
 
 ```dockerfile
-FROM ghost:6.53.0-alpine
+FROM ghost:6.54.0-alpine
 
 USER root
 RUN apk add --no-cache git
@@ -142,4 +142,4 @@ EMAIL_PROVIDER=SESEmailProvider
 
 ## Upstream status
 
-This patch is temporary. It becomes unnecessary after [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553) — the upstream adapter-wiring PR tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) — is merged and released; once it ships, installing this adapter needs no patching and no other changes to Ghost core. The PR is open and awaiting maintainer review — comments or reactions there help it get considered. It was last verified against the embedded Ghost v6.53.0 runtime; re-run the integration check before every Ghost upgrade.
+This patch is temporary. It becomes unnecessary after [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553) — the upstream adapter-wiring PR tracked by [issue #5](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues/5) — is merged and released; once it ships, installing this adapter needs no patching and no other changes to Ghost core. The PR is open and awaiting maintainer review — comments or reactions there help it get considered. It was last verified against the embedded Ghost v6.54.0 runtime; re-run the integration check before every Ghost upgrade.

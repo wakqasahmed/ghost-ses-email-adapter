@@ -1,6 +1,12 @@
 const errors = require('@tryghost/errors');
 const debug = require('@tryghost/debug')('email-suppression:ses-adapter');
 
+// SES's GetSuppressedDestination has a comparatively low per-account TPS quota.
+// Ghost calls getBulkSuppressionData for every members-list page, potentially
+// hundreds of emails at once - bound how many lookups are in flight together so a
+// large page doesn't itself trigger the throttling it needs to tolerate.
+const MAX_CONCURRENT_LOOKUPS = 10;
+
 /**
  * Amazon SES account-level suppression list adapter.
  *
@@ -53,7 +59,7 @@ class SESSuppressionProvider {
                 suppressed: true,
                 info: {
                     reason: destination.Reason === 'COMPLAINT' ? 'spam' : 'fail',
-                    timestamp: destination.LastUpdateTime
+                    timestamp: destination.LastUpdateTime instanceof Date ? destination.LastUpdateTime : new Date()
                 }
             };
         } catch (err) {
@@ -67,7 +73,14 @@ class SESSuppressionProvider {
     }
 
     async getBulkSuppressionData(emails) {
-        return Promise.all(emails.map(email => this.getSuppressionData(email)));
+        const results = [];
+
+        for (let index = 0; index < emails.length; index += MAX_CONCURRENT_LOOKUPS) {
+            const chunk = emails.slice(index, index + MAX_CONCURRENT_LOOKUPS);
+            results.push(...await Promise.all(chunk.map(email => this.getSuppressionData(email))));
+        }
+
+        return results;
     }
 
     async removeEmail(email) {

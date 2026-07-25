@@ -35,7 +35,7 @@ Need SES access walled off behind IAM — a shared platform account, cross-accou
 
 | Ghost version | Status | Verified runtime | Interim wiring patch | Disposable check |
 | --- | --- | --- | --- | --- |
-| 6.x | Supported | `ghost:6-alpine` (v6.53.0) | [`ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) | `test/integration/ghost-6.sh` |
+| 6.x | Supported | `ghost:6-alpine` (v6.54.0) | [`ghost-6.x-email-adapter-wiring.patch`](patches/ghost-6.x-email-adapter-wiring.patch) | `test/integration/ghost-6.sh` |
 | 5.130.6 | Supported | `ghost:5.130.6-alpine` | [`ghost-5.x-email-adapter-wiring.patch`](patches/ghost-5.x-email-adapter-wiring.patch) | `test/integration/ghost-5.sh` |
 
 Both versions need their matching patch until Ghost core ships third-party email adapter wiring ([upstream status](docs/installation.md#upstream-status)). Other Ghost 5.x releases have not been verified; re-run the Ghost 5 disposable check against the exact version before using the patch. Re-run the matching disposable check before every Ghost upgrade.

@@ -59,7 +59,7 @@ class SESSuppressionProvider {
                 suppressed: true,
                 info: {
                     reason: destination.Reason === 'COMPLAINT' ? 'spam' : 'fail',
-                    timestamp: destination.LastUpdateTime
+                    timestamp: destination.LastUpdateTime instanceof Date ? destination.LastUpdateTime : new Date()
                 }
             };
         } catch (err) {

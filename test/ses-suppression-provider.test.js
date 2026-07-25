@@ -78,6 +78,17 @@ describe('SES Suppression Provider', function () {
         sinon.assert.calledOnceWithExactly(sesClient.send, {input: {EmailAddress: 'member@example.com'}});
     });
 
+    it('falls back to the current time when SES omits LastUpdateTime', async function () {
+        sesClient.send.resolves({
+            SuppressedDestination: {Reason: 'BOUNCE'}
+        });
+
+        const result = await createProvider().getSuppressionData('member@example.com');
+
+        result.suppressed.should.be.true();
+        result.info.timestamp.should.be.instanceOf(Date);
+    });
+
     it('maps a complaint suppression to spam', async function () {
         sesClient.send.resolves({
             SuppressedDestination: {Reason: 'COMPLAINT', LastUpdateTime: new Date('2026-07-23T10:00:00.000Z')}
@@ -110,7 +121,10 @@ describe('SES Suppression Provider', function () {
 
         const result = await createProvider().getBulkSuppressionData(['bounce@example.com', 'clear@example.com']);
 
-        result.should.deepEqual([{suppressed: true, info: {reason: 'fail', timestamp: undefined}}, {suppressed: false, info: null}]);
+        result[0].suppressed.should.be.true();
+        result[0].info.reason.should.equal('fail');
+        result[0].info.timestamp.should.be.instanceOf(Date);
+        result[1].should.deepEqual({suppressed: false, info: null});
     });
 
     it('bounds concurrent lookups for a large bulk request instead of firing them all at once', async function () {

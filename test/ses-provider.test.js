@@ -580,7 +580,7 @@ describe('SES Email Provider Adapter', function () {
             command.Source.should.match(/^=\?UTF-8\?B\?.+\?= <test@example\.com>$/);
         });
 
-        it('should sanitize recipient email addresses in bulk Bcc headers', async function () {
+        it('should never place recipient addresses in the bulk send raw MIME message', async function () {
             emailData.recipients = [
                 {email: 'member@example.com\r\nX-Injected: value'},
                 {email: 'other@example.com'}
@@ -588,25 +588,15 @@ describe('SES Email Provider Adapter', function () {
 
             await adapter.send(emailData, sendOptions);
 
-            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
-            const bccHeader = rawMessage.match(/^Bcc: ([\s\S]*?)\r\nSubject:/m)[1];
+            const command = SendRawEmailCommand.firstCall.args[0];
+            const rawMessage = command.RawMessage.Data.toString();
 
-            bccHeader.should.equal('member@example.comX-Injected: value, other@example.com');
+            rawMessage.should.not.match(/^Bcc:/m);
+            rawMessage.should.not.containEql('member@example.com');
+            rawMessage.should.not.containEql('other@example.com');
             rawMessage.should.not.match(/^X-Injected:/m);
-        });
-
-        it('should fold long bulk Bcc headers below the RFC 5322 line limit', async function () {
-            emailData.recipients = Array.from({length: 50}, (_, index) => ({
-                email: `member-${index}-${'long-local-part'.repeat(4)}@example.com`
-            }));
-
-            await adapter.send(emailData, sendOptions);
-
-            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
-            const bccHeader = rawMessage.match(/^Bcc:.*(?:\r\n [^\r\n]*)*/m)[0];
-
-            bccHeader.should.containEql('\r\n ');
-            bccHeader.split('\r\n').forEach(line => Buffer.byteLength(line).should.be.belowOrEqual(900));
+            rawMessage.should.match(/^To: undisclosed-recipients:;$/m);
+            command.Destinations.should.containDeep(['other@example.com']);
         });
 
         it('should fold long RFC 2047 encoded subject values into valid encoded words', async function () {
@@ -944,7 +934,7 @@ describe('SES Email Provider Adapter', function () {
     });
 
     describe('getTargetDeliveryWindow()', function () {
-        it('should return 3600 seconds (1 hour)', function () {
+        it('should return 0 so Ghost skips delivery-time spreading it cannot honor', function () {
             const adapter = new SESEmailProvider({
                 ses: {
                     region: 'us-east-1',
@@ -954,7 +944,7 @@ describe('SES Email Provider Adapter', function () {
 
             const deliveryWindow = adapter.getTargetDeliveryWindow();
 
-            deliveryWindow.should.equal(3600);
+            deliveryWindow.should.equal(0);
         });
     });
 

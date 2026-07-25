@@ -7,7 +7,6 @@ const LambdaSESSender = require('./LambdaSESSender');
 
 // Keep retry recipient state short-lived in practice and bounded to 1,000 keys to limit memory and PII retention.
 const MAX_RETRY_STATE_ENTRIES = 1000;
-const MAX_BCC_HEADER_LINE_LENGTH = 900;
 
 /**
  * Amazon SES Email Provider Adapter
@@ -174,8 +173,11 @@ class SESEmailProvider extends EmailProviderBase {
         return replacement?.value ? this.#sanitizeHeader(replacement.value).trim() : '';
     }
 
+    // Only applies PII redaction - callers that need a human-readable fallback for a
+    // missing message (e.g. 'SES Error') must apply it themselves after calling this,
+    // so the fallback text never leaks into non-message fields like name/code.
     #redactPII(value, recipients = []) {
-        let redactedValue = String(value || 'SES Error');
+        let redactedValue = String(value || '');
 
         for (const recipient of recipients) {
             redactedValue = redactedValue.split(String(recipient.email)).join('[redacted]');
@@ -225,27 +227,6 @@ class SESEmailProvider extends EmailProviderBase {
         if (this.#successfulRecipients.size > MAX_RETRY_STATE_ENTRIES) {
             this.#successfulRecipients.delete(this.#successfulRecipients.keys().next().value);
         }
-    }
-
-    #formatBccHeader(recipients) {
-        const addresses = recipients.map(recipient => this.#sanitizeHeader(recipient.email));
-        const lines = [];
-        let line = 'Bcc:';
-
-        for (const [index, address] of addresses.entries()) {
-            const value = index === addresses.length - 1 ? address : `${address},`;
-            const candidate = `${line} ${value}`;
-
-            if (line !== 'Bcc:' && Buffer.byteLength(candidate) > MAX_BCC_HEADER_LINE_LENGTH) {
-                lines.push(line);
-                line = ` ${value}`;
-            } else {
-                line = candidate;
-            }
-        }
-
-        lines.push(line);
-        return lines.join('\r\n');
     }
 
     /**
@@ -477,7 +458,7 @@ class SESEmailProvider extends EmailProviderBase {
      * @returns {string} Error message (max 2000 chars)
      */
     #createSESErrorMessage(error, recipients) {
-        const message = this.#redactPII(error?.message, recipients) + (error?.$metadata?.httpStatusCode ? ` (${error.$metadata.httpStatusCode})` : '');
+        const message = (this.#redactPII(error?.message, recipients) || 'SES Error') + (error?.$metadata?.httpStatusCode ? ` (${error.$metadata.httpStatusCode})` : '');
         return message.slice(0, 2000);
     }
 
@@ -496,7 +477,6 @@ class SESEmailProvider extends EmailProviderBase {
         debug(`sending bulk email to ${recipients.length} recipients in ${batches.length} batches`);
 
         for (const batch of batches) {
-            const bccHeader = this.#formatBccHeader(batch);
             const sanitizedFrom = this.#sanitizeHeader(from || this.#sesConfig.fromEmail);
             const encodedFrom = this.#encodeAddressHeader(sanitizedFrom, 'From');
             const source = this.#encodeAddressHeader(sanitizedFrom, undefined, false);
@@ -510,10 +490,13 @@ class SESEmailProvider extends EmailProviderBase {
             const domain = sanitizedFrom.match(/@([^>]+)/)?.[1] || 'localhost';
             const messageId = `<${Date.now()}.${Math.random().toString(36).substring(2)}@${domain}>`;
 
+            // Recipients are routed entirely through the SES Destinations parameter
+            // below, not a Bcc: header - SES's raw-send API documents no guarantee
+            // that a Bcc header is stripped before delivery, so including one here
+            // would risk exposing every batch recipient's address to the others.
             let mime = [
                 `From: ${encodedFrom}`,
                 `To: undisclosed-recipients:;`,
-                bccHeader,
                 `Subject: ${encodedSubject}`,
                 `Date: ${new Date().toUTCString()}`,
                 `Message-ID: ${messageId}`
@@ -566,9 +549,12 @@ class SESEmailProvider extends EmailProviderBase {
         debug(`sent bulk email to ${recipients.length} recipients in ${duration}ms (${throughput.toFixed(2)} emails/sec)`);
         debug(`SES returned ${results.length} batch MessageId(s)`);
 
-        // Return first MessageId (represents the bulk send)
+        // Return first MessageId (represents the bulk send). If every recipient was
+        // already sent in a prior attempt, results is empty here - fall back to the
+        // retry key (unique per batch) rather than a generic 'unknown' string, so the
+        // stored provider_id still traces back to a real send operation.
         return {
-            id: results[0] || 'unknown'
+            id: results[0] || retryKey
         };
     }
 
@@ -700,15 +686,18 @@ class SESEmailProvider extends EmailProviderBase {
             // 1. Each SES event has its own real MessageId (in providerId field)
             // 2. All events grouped by email-id tag (set in SES Tags)
             // 3. Database provider_id is just a reference, not used for matching
+            // If every recipient was already sent in a prior attempt, results is empty
+            // here - fall back to the retry key (unique per batch) rather than a
+            // generic 'unknown' string.
             return {
-                id: results[0]?.messageId || 'unknown'
+                id: results[0]?.messageId || retryKey
             };
         } catch (e) {
             let ghostError;
 
             const redactedError = {
                 name: this.#redactPII(e.name, recipients),
-                message: this.#redactPII(e.message, recipients),
+                message: this.#redactPII(e.message, recipients) || 'SES Error',
                 code: this.#redactPII(e.code, recipients),
                 statusCode: e.$metadata?.httpStatusCode
             };
@@ -718,7 +707,7 @@ class SESEmailProvider extends EmailProviderBase {
                 recipientCount: recipients.length
             }).slice(0, 2000);
 
-            const sanitizedError = new Error(this.#redactPII(e.message, recipients));
+            const sanitizedError = new Error(this.#redactPII(e.message, recipients) || 'SES Error');
             sanitizedError.name = this.#redactPII(e.name, recipients);
             sanitizedError.code = this.#redactPII(e.code, recipients);
             sanitizedError.$metadata = {httpStatusCode: e.$metadata?.httpStatusCode};
@@ -727,7 +716,7 @@ class SESEmailProvider extends EmailProviderBase {
                 statusCode: e.$metadata?.httpStatusCode || 500,
                 message: this.#createSESErrorMessage(e, recipients),
                 errorDetails,
-                context: `Amazon SES Error: ${this.#redactPII(e.message, recipients)}`,
+                context: `Amazon SES Error: ${this.#redactPII(e.message, recipients) || 'SES Error'}`,
                 help: 'https://ghost.org/docs/newsletters/#bulk-email-configuration',
                 code: 'BULK_EMAIL_SEND_FAILED',
                 err: sanitizedError
@@ -756,13 +745,15 @@ class SESEmailProvider extends EmailProviderBase {
     }
 
     /**
-     * Get target delivery window in seconds
-     * @returns {number} Delivery window in seconds
+     * Get target delivery window in milliseconds (Ghost's batch-sending-service adds
+     * this directly to Date.getTime()). SES sends immediately and this adapter does
+     * not read options.deliveryTime, so 0 tells Ghost to skip delivery-time spreading
+     * rather than advertise a window (the previous 3600 was also off by 1000x - Ghost
+     * expects milliseconds, not seconds).
+     * @returns {number} Delivery window in milliseconds
      */
     getTargetDeliveryWindow() {
-        // SES doesn't have specific delivery windows like Mailgun
-        // Return a reasonable value for batch processing
-        return 3600; // 1 hour
+        return 0;
     }
 }
 

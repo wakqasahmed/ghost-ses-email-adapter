@@ -766,6 +766,22 @@ describe('SES Email Provider Adapter', function () {
                 err.statusCode.should.equal(500);
             }
         });
+
+        it('should not leak the missing-message fallback text into name/code fields', async function () {
+            const sesError = new Error('Something went wrong');
+            // No .code or .name beyond the default Error name
+
+            sesClient.send.rejects(sesError);
+
+            try {
+                await adapter.send(emailData, sendOptions);
+                throw new Error('Expected send to reject');
+            } catch (err) {
+                const details = JSON.parse(err.errorDetails);
+                details.error.code.should.equal('');
+                details.error.message.should.equal('Something went wrong');
+            }
+        });
     });
 
     describe('getMaximumRecipients()', function () {
@@ -942,7 +958,7 @@ describe('SES Email Provider Adapter', function () {
     });
 
     describe('getTargetDeliveryWindow()', function () {
-        it('should return 3600 seconds (1 hour)', function () {
+        it('should return 0 so Ghost skips delivery-time spreading it cannot honor', function () {
             const adapter = new SESEmailProvider({
                 ses: {
                     region: 'us-east-1',
@@ -952,7 +968,7 @@ describe('SES Email Provider Adapter', function () {
 
             const deliveryWindow = adapter.getTargetDeliveryWindow();
 
-            deliveryWindow.should.equal(3600);
+            deliveryWindow.should.equal(0);
         });
     });
 

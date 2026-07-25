@@ -41,6 +41,20 @@ describe('SES Analytics Provider', function () {
         sqsClient.send.onThirdCall().resolves({});
     }
 
+    // For scenarios where the message is left undeleted, the second .send() call is
+    // the next ReceiveMessageCommand (not a DeleteMessageCommand), so it must resolve
+    // to an empty result to end the poll loop.
+    function queueUndeletedMessage(body) {
+        sqsClient.send.onFirstCall().resolves({
+            Messages: [{
+                MessageId: 'sqs-message-1',
+                ReceiptHandle: 'receipt-1',
+                Body: JSON.stringify(body)
+            }]
+        });
+        sqsClient.send.onSecondCall().resolves({});
+    }
+
     function createProvider() {
         return new SESAnalyticsProvider({
             ses: {
@@ -105,6 +119,63 @@ describe('SES Analytics Provider', function () {
             timestamp: new Date('2026-07-22T10:00:00.000Z')
         }]);
         sqsClient.send.callCount.should.equal(3);
+    });
+
+    it('leaves a message undeleted when its event type is not requested by this call, for a different pass to consume', async function () {
+        queueUndeletedMessage({
+            Type: 'Notification',
+            Message: JSON.stringify({
+                eventType: 'Delivery',
+                mail: {
+                    messageId: 'ses-message-1',
+                    tags: {'email-id': ['ghost-email-1']}
+                },
+                delivery: {
+                    timestamp: '2026-07-22T10:00:00.000Z',
+                    recipients: ['member@example.com']
+                }
+            })
+        });
+
+        const provider = createProvider();
+        const batchHandler = sinon.stub().resolves();
+
+        // Simulates Ghost's 'opened'-only analytics pass encountering a Delivery message
+        await provider.fetchLatest(batchHandler, {events: ['opened']});
+
+        batchHandler.called.should.be.false();
+        // Only two calls: ReceiveMessage, then the next ReceiveMessage that ends the
+        // loop - no DeleteMessageCommand, so the message survives for the pass that
+        // actually wants 'delivered' events.
+        sqsClient.send.callCount.should.equal(2);
+    });
+
+    it('leaves a message undeleted and skips its events when outside the requested time window', async function () {
+        queueUndeletedMessage({
+            Type: 'Notification',
+            Message: JSON.stringify({
+                eventType: 'Delivery',
+                mail: {
+                    messageId: 'ses-message-1',
+                    tags: {'email-id': ['ghost-email-1']}
+                },
+                delivery: {
+                    timestamp: '2026-07-22T10:00:00.000Z',
+                    recipients: ['member@example.com']
+                }
+            })
+        });
+
+        const provider = createProvider();
+        const batchHandler = sinon.stub().resolves();
+
+        await provider.fetchLatest(batchHandler, {
+            begin: new Date('2026-07-23T00:00:00.000Z'),
+            end: new Date('2026-07-24T00:00:00.000Z')
+        });
+
+        batchHandler.called.should.be.false();
+        sqsClient.send.callCount.should.equal(2);
     });
 
     it('maps a bounce notification to a failed event', async function () {

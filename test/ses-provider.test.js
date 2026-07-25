@@ -580,33 +580,31 @@ describe('SES Email Provider Adapter', function () {
             command.Source.should.match(/^=\?UTF-8\?B\?.+\?= <test@example\.com>$/);
         });
 
-        it('should sanitize recipient email addresses in bulk Bcc headers', async function () {
+        it('should not write a Bcc header into the raw MIME message for bulk sends', async function () {
             emailData.recipients = [
-                {email: 'member@example.com\r\nX-Injected: value'},
+                {email: 'member@example.com'},
                 {email: 'other@example.com'}
             ];
 
             await adapter.send(emailData, sendOptions);
 
             const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
-            const bccHeader = rawMessage.match(/^Bcc: ([\s\S]*?)\r\nSubject:/m)[1];
 
-            bccHeader.should.equal('member@example.comX-Injected: value, other@example.com');
-            rawMessage.should.not.match(/^X-Injected:/m);
+            rawMessage.should.not.match(/^Bcc:/m);
         });
 
-        it('should fold long bulk Bcc headers below the RFC 5322 line limit', async function () {
+        it('should route all bulk recipients via Destinations without a Bcc header', async function () {
             emailData.recipients = Array.from({length: 50}, (_, index) => ({
-                email: `member-${index}-${'long-local-part'.repeat(4)}@example.com`
+                email: `member-${index}@example.com`
             }));
 
             await adapter.send(emailData, sendOptions);
 
-            const rawMessage = SendRawEmailCommand.firstCall.args[0].RawMessage.Data.toString();
-            const bccHeader = rawMessage.match(/^Bcc:.*(?:\r\n [^\r\n]*)*/m)[0];
+            const command = SendRawEmailCommand.firstCall.args[0];
+            const rawMessage = command.RawMessage.Data.toString();
 
-            bccHeader.should.containEql('\r\n ');
-            bccHeader.split('\r\n').forEach(line => Buffer.byteLength(line).should.be.belowOrEqual(900));
+            rawMessage.should.not.match(/^Bcc:/m);
+            command.Destinations.should.deepEqual(emailData.recipients.map(recipient => recipient.email));
         });
 
         it('should fold long RFC 2047 encoded subject values into valid encoded words', async function () {

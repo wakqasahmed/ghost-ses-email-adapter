@@ -10,7 +10,7 @@ Ghost's native newsletter bulk-sending only integrates with Mailgun. Amazon SES 
 
 > "I think having an adapter mechanism would be enough for Ghost core. And self-hosters can use a 3rd party adapter to add SES or other providers to their Ghost sites." — Ghost core team, on #25367
 
-This package is that community-maintained SES provider. Whether you send directly or through a locked-down Lambda for IAM/compliance reasons, it's the most complete SES integration available for Ghost today — bulk sending with retries and idempotency, SESv2 suppression-list support, and an analytics provider for opens/bounces/complaints, ahead of what any other third-party option offers.
+This package is that community-maintained SES provider. Whether you send directly or through a locked-down Lambda for IAM/compliance reasons, it's the most complete SES integration available for Ghost today — newsletter sending with retries and idempotency, SESv2 suppression-list support, and an analytics provider for opens/bounces/complaints, ahead of what any other third-party option offers. (Note: Ghost's `sending-service` currently attaches per-recipient personalization, e.g. the unsubscribe token, to every send, so in practice each recipient is sent individually rather than batched via BCC.)
 
 A companion minimal PR to Ghost core, [TryGhost/Ghost#29553](https://github.com/TryGhost/Ghost/pull/29553), proposes the small wiring change needed for stock Ghost to load third-party email adapters — no bundled SES code, just the adapter-manager hook Ghost core itself asked for. **It's open and awaiting maintainer review; a comment or reaction there directly helps it get traction.** Until it merges, an interim patch (below) enables the adapter on self-hosted installs.
 

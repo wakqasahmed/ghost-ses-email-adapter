@@ -4,6 +4,8 @@
 
 A standalone npm package providing an **Amazon SES bulk email provider adapter for Ghost**, following the same community-adapter conventions as Ghost storage adapters (e.g. `ghost-storage-adapter-s3`): installable via npm / copyable into `content/adapters/email/ses/`, configured via Ghost's `adapters.email` config block.
 
+**Known patch inconsistency (bundle with issue #55, do not fix in isolation):** `patches/ghost-6.x-email-adapter-wiring.patch` embeds its own `EmailProviderBase` inside Ghost core (`core/server/adapters/email/email-provider-base.js`) that only requires `['send']`, while the package's own `EmailProviderBase.js` requires all three (`send`, `getMaximumRecipients`, `getTargetDeliveryWindow`). AdapterManager validates against the patch's looser copy, so it would currently accept an incomplete provider. Any edit to this patch needs `test/integration/ghost-6.sh` to actually verify it — which is presently blocked by issue #55 (the patch doesn't apply to the current `ghost:6-alpine`, 6.54.0). Fix both together once #55's patch update lands, not separately with no way to test.
+
 ## Critical architectural facts (verified against Ghost source — do not re-derive)
 
 1. Ghost's `AdapterManager` (`ghost/core/core/server/services/adapter-manager/`) loads third-party adapters from `node_modules` and `content/adapters/` — this mechanism ships in stock Ghost today and is how storage adapters work.
@@ -18,7 +20,7 @@ A standalone npm package providing an **Amazon SES bulk email provider adapter f
 ## Version targets
 
 - **Primary: Ghost 6.x** (current major; upstream PR target).
-- Ghost 5.x compatibility is **backlog** (issue #8), not in scope for initial issues. Note 5.x uses `services/email-service/MailgunEmailProvider.js` (capitalized filenames) vs 6.x `mailgun-email-provider.js` — the wiring differs between majors.
+- Ghost 5.x compatibility (issue #9, closed) is shipped and supported — see the README's supported-versions table. Note 5.x uses `services/email-service/MailgunEmailProvider.js` (capitalized filenames) vs 6.x `mailgun-email-provider.js` — the wiring differs between majors. (Issue #8 became the SES suppression-list provider, `SESSuppressionProvider.js` — unrelated to 5.x compatibility.)
 
 ## Testing conventions
 

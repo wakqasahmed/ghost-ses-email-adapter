@@ -12,8 +12,11 @@
     "SESAnalyticsProvider.js",
     "SESSuppressionProvider.js",
     "patches",
+    "docs",
+    "examples",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
   "repository": {

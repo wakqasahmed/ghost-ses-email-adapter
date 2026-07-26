@@ -1,6 +1,15 @@
-# ghost-ses-email-adapter
+<h1 align="center">Ghost SES Email Adapter</h1>
+<p align="center">Amazon SES bulk email provider adapter for <a href="https://ghost.org" target="_blank">Ghost</a>, packaged as a standalone npm module following Ghost's community adapter conventions (the same pattern as Ghost storage adapters).</p>
+<p align="center">
+  <a aria-label="NPM Version" href="https://www.npmjs.com/package/ghost-ses-email-adapter">
+    <img alt="" src="https://img.shields.io/npm/v/ghost-ses-email-adapter.svg?label=NPM&logo=npm&style=for-the-badge&color=0470FF&logoColor=white">
+  </a>
+  <a aria-label="NPM Download Count" href="https://www.npmjs.com/packageghost-ses-email-adapter">
+    <img alt="" src="https://img.shields.io/npm/dt/cgemini?label=Downloads&style=for-the-badge&color=27B2FF">
+  </a>
+</p>
 
-Amazon SES bulk email provider adapter for [Ghost](https://ghost.org), packaged as a standalone npm module following Ghost's community adapter conventions (the same pattern as Ghost storage adapters).
+
 
 > **Status: pre-alpha — under active development.** See the [issues](https://github.com/wakqasahmed/ghost-ses-email-adapter/issues) for the roadmap.
 

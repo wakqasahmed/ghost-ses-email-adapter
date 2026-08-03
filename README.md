@@ -4,7 +4,7 @@
   <a aria-label="NPM Version" href="https://www.npmjs.com/package/ghost-ses-email-adapter">
     <img alt="" src="https://img.shields.io/npm/v/ghost-ses-email-adapter.svg?label=NPM&logo=npm&style=for-the-badge&color=0470FF&logoColor=white">
   </a>
-  <a aria-label="NPM Download Count" href="https://www.npmjs.com/packageghost-ses-email-adapter">
+  <a aria-label="NPM Download Count" href="https://www.npmjs.com/package/ghost-ses-email-adapter">
     <img alt="" src="https://img.shields.io/npm/dt/ghost-ses-email-adapter?label=Downloads&style=for-the-badge&color=27B2FF">
   </a>
 </p>
